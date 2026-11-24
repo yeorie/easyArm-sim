@@ -24,6 +24,7 @@ input:not([type="checkbox"], [type="range"]), select {
 }
 input[type="number"] { font-family: var(--mono); }
 input[type="number"] { appearance: textfield; }
+input[aria-invalid="true"] { border-color: #f77e7a !important; }
 input[type="number"]::-webkit-inner-spin-button { appearance: none; }
 input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 :focus-visible { outline: 2px solid #8bc8ff; outline-offset: 2px; }
@@ -66,10 +67,22 @@ h3 { font-size: 13px; font-weight: 650; }
 .preset-item:disabled { opacity: 1; border-color: #4e7397; }
 .preset-license a { color: var(--accent); }
 .display-switch { display: flex; align-items: center; gap: 4px; margin-top: 5px; font-size: 11px; color: #b8c5d3; cursor: pointer; }
-.zero-actions { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 6px; }
+.zero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 6px; }
 .zero-actions button { font-size: 11px; }
-.zero-actions .display-switch { margin: 0; white-space: nowrap; }
+.zero-actions .display-switch { margin: 0 0 0 auto; white-space: nowrap; }
 #zero-status { margin-bottom: 6px; }
+#ur-range-panel { margin: 0 0 9px; }
+#ur-range-status { color: #f5ba83; }
+.pose-check { padding: 6px 8px; border: 1px solid #344354; border-radius: 6px; margin-bottom: 6px; }
+.pose-check summary { cursor: pointer; font-size: 11px; }
+.pose-check summary output { float: right; color: #8fdbbf; font-size: 11px; }
+.pose-check[data-level="near"] summary output, .pose-check[data-level="limited"] summary output { color: #f5cb82; }
+.pose-check[data-level="singular"] summary output { color: #ff9994; }
+.pose-check p { margin-top: 4px; }
+#limits-summary { margin: 4px 0 6px; color: #f5cb82; }
+.jog-row[data-limit="near"] .jog-limits { color: #f5cb82; }
+.jog-row[data-limit="at"] .jog-limits, .jog-row[data-limit="locked"] .jog-limits { color: #ff9994; }
+.jog-row[data-limit="at"] input[type=range] { accent-color: #f77e7a; }
 .joint-list { display: grid; gap: 4px; }
 .joint-choice {
   min-width: 0; display: grid; align-items: center; grid-template-columns: 26px minmax(0, 1fr) max-content;

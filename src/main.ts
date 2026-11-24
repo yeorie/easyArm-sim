@@ -3,6 +3,8 @@ import { axes, clampAngle, interpolate, offsetAxis, poseProblem, radius, sample,
 import { createScene, type PointerMode } from './scene.ts';
 import { maxAngle, maxJoints, maxLength, readState, storageKey, switchPreset, type Preset } from './storage.ts';
 import { nearestDistance, slicePoints, sliceTolerance, targetPosition } from './workspace.ts';
+import { jointLimitStatus, mobility, mobilityReference, type MobilityReference } from './mobility.ts';
+import { makeUr5e, ur5eUprightAngles, type Ur5eRange } from './ur5e.ts';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const state = readState();
@@ -18,7 +20,15 @@ const fit = element<HTMLButtonElement>('fit');
 const topView = element<HTMLButtonElement>('top-view');
 const pointerMode = element<HTMLSelectElement>('pointer-mode');
 const zeroButton = element<HTMLButtonElement>('zero');
+const uprightButton = element<HTMLButtonElement>('upright');
 const zeroStatus = element('zero-status');
+const urRange = element<HTMLSelectElement>('ur-range-profile');
+const urRangeStatus = element('ur-range-status');
+const mobilitySummary = element<HTMLOutputElement>('mobility-summary');
+const mobilityPosition = element('mobility-position');
+const mobilityPose = element('mobility-pose');
+const limitsSummary = element('limits-summary');
+const angleInputStatus = element('angle-input-status');
 const status = element('status');
 const sceneHost = element('scene');
 const coordinates = ['tcp-x', 'tcp-y', 'tcp-z'].map(id => element<HTMLOutputElement>(id));
@@ -27,7 +37,8 @@ const jogFields: { range: HTMLInputElement; angle: HTMLInputElement }[] = [];
 let activeJoint = 0;
 let scene: ReturnType<typeof createScene> | undefined;
 let moveFrame = 0;
-let movingToZero = false;
+let referenceMove = '';
+let reference: MobilityReference = { position: 0, pose: 0 };
 let workspaceSamples: Float64Array = new Float64Array(0);
 try {
   scene = createScene(sceneHost, (x, y) => {
@@ -100,9 +111,9 @@ function stopMove(manual = false) {
   if (!moveFrame) return;
   cancelAnimationFrame(moveFrame);
   moveFrame = 0;
-  if (movingToZero) {
-    zeroStatus.textContent = '영위치 이동 중단';
-    movingToZero = false;
+  if (referenceMove) {
+    zeroStatus.textContent = referenceMove + ' 이동 중단';
+    referenceMove = '';
   }
   persist();
   poseButtons(false);
@@ -115,13 +126,43 @@ function showActiveAngle() {
   element<HTMLOutputElement>('active-angle').value = `J${activeJoint + 1} · ${joint.axis} · ${angle}°`;
 }
 
+function checkMobility(solved: ReturnType<typeof solve>) {
+  const { position, pose } = mobility(state.model, solved, reference);
+  let level = 'normal';
+  let summary = '정상';
+  if (position.level === 'singular' || pose.level === 'singular') {
+    level = 'singular';
+    summary = position.level === 'singular' ? '위치 특이점' : '방향 특이점';
+  } else if (position.level === 'near' || pose.level === 'near') {
+    level = 'near';
+    summary = position.level === 'near' ? '위치 특이점 근접' : '방향 특이점 근접';
+  } else if (reference.position < 3 || reference.pose < 6) {
+    level = 'limited';
+    summary = reference.pose === 0 ? '모든 축 고정' : '구조 자유도 제한';
+  }
+  if (mobilitySummary.value !== summary) mobilitySummary.value = summary;
+  mobilitySummary.closest('details')!.dataset.level = level;
+  mobilityPosition.textContent = `TCP 위치 ${position.rank}/3 · 모델 기준 ${reference.position} · 민감도 ${(position.ratio * 100).toFixed(1)}%`;
+  mobilityPose.textContent = `위치+방향 ${pose.rank}/6 · 모델 기준 ${reference.pose} · 민감도 ${(pose.ratio * 100).toFixed(1)}%`;
+}
+
 function updatePose(skipAngle?: HTMLInputElement) {
+  const limits: string[] = [];
   for (const [i, fields] of jogFields.entries()) {
     const angle = state.angles[i];
     fields.range.value = String(angle);
     if (fields.angle !== skipAngle) fields.angle.value = String(Number(angle.toFixed(4)));
+    const stateAtLimit = jointLimitStatus(state.model.joints[i], angle);
+    (jog.children[i] as HTMLElement).dataset.limit = stateAtLimit;
+    if (stateAtLimit !== 'free') {
+      const message = stateAtLimit === 'locked' ? '고정' : stateAtLimit === 'at' ? '한계' : '한계 근접';
+      limits.push(`J${i + 1} ${message}`);
+    }
   }
+  const limitText = limits.join(' · ');
+  if (limitsSummary.textContent !== limitText) limitsSummary.textContent = limitText;
   const solved = solve(state.model, state.angles);
+  checkMobility(solved);
   showActiveAngle();
   solved.tcp.toArray().forEach((value, i) => {
     coordinates[i].value = (Math.abs(value) < 0.05 ? 0 : value).toFixed(1);
@@ -147,9 +188,10 @@ function updateStructure(topologyChanged = false) {
   element('axis-count').textContent = state.model.joints.length + '축';
   element<HTMLOutputElement>('bound').value = radius(state.model).toFixed(1) + ' mm';
   if (topologyChanged) renderJointList();
-  else state.model.joints.forEach((joint, i) => { list.children[i].children[2].textContent = joint.length + ' mm'; });
+  else state.model.joints.forEach((joint, i) => { list.children[i].children[2].textContent = Number(joint.length.toFixed(1)) + ' mm'; });
   renderPoses();
   workspaceSamples = sample(state.model);
+  reference = mobilityReference(state.model);
   scene?.rebuild(state.model, state.preset === 'ur5e');
   scene?.setSamples(workspaceSamples);
   refreshTarget();
@@ -312,6 +354,7 @@ function refreshJogLimits() {
 
 function renderJog() {
   jog.replaceChildren();
+  angleInputStatus.textContent = '';
   jogFields.length = 0;
   state.model.joints.forEach((_, index) => {
     const row = document.createElement('div');
@@ -336,16 +379,24 @@ function renderJog() {
     for (const input of [range, angle]) {
       input.addEventListener('input', () => {
         stopMove(true);
-        if (!Number.isFinite(input.valueAsNumber)) return;
         const joint = state.model.joints[index];
-        if (input === angle && !angle.validity.valid) return;
+        if (!Number.isFinite(input.valueAsNumber) || (input === angle && !angle.validity.valid)) {
+          angle.setAttribute('aria-invalid', 'true');
+          angleInputStatus.textContent = `J${index + 1} 허용 범위 ${joint.min}° ~ ${joint.max}°`;
+          return;
+        }
+        angle.removeAttribute('aria-invalid');
+        angleInputStatus.textContent = '';
         state.angles[index] = Number(clampAngle(input.valueAsNumber, joint).toFixed(4));
         state.angles[index] = clampAngle(state.angles[index], joint);
         updatePose(input === angle ? angle : undefined);
         persist();
       });
     }
-    angle.addEventListener('blur', () => { angle.value = String(state.angles[index]); });
+    angle.addEventListener('blur', () => {
+      angle.removeAttribute('aria-invalid');
+      angle.value = String(state.angles[index]);
+    });
     angle.addEventListener('keydown', event => {
       if (event.key === 'Enter') angle.blur();
     });
@@ -353,6 +404,7 @@ function renderJog() {
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) return;
       event.preventDefault();
       stopMove(true);
+      angleInputStatus.textContent = '';
       const { min, max } = state.model.joints[index];
       const before = state.angles[index];
       const step = event.key.startsWith('Page') ? 10 : 1;
@@ -445,6 +497,10 @@ function displayPreset() {
     element<HTMLButtonElement>('load-' + preset).disabled = state.preset === preset;
   }
   element('structure-title').textContent = state.preset === 'ur5e' ? 'UR5e' : '팔 모델';
+  element('ur-range-panel').hidden = state.preset !== 'ur5e';
+  uprightButton.hidden = state.preset !== 'ur5e';
+  urRange.value = state.ur5eRange;
+  urRangeStatus.textContent = '';
 }
 for (const preset of ['custom', 'ur5e'] as Preset[]) {
   element('load-' + preset).addEventListener('click', () => {
@@ -462,6 +518,25 @@ for (const preset of ['custom', 'ur5e'] as Preset[]) {
     scene?.fit();
   });
 }
+
+urRange.addEventListener('change', () => {
+  if (state.preset !== 'ur5e') return;
+  stopMove();
+  const next = urRange.value as Ur5eRange;
+  const model = makeUr5e(next);
+  if (model.joints.some((joint, index) => clampAngle(state.angles[index], joint) !== state.angles[index])) {
+    urRange.value = state.ur5eRange;
+    urRangeStatus.textContent = 'J3를 ±160° 안쪽으로 움직인 뒤 변경하세요.';
+    return;
+  }
+  urRangeStatus.textContent = '';
+  model.tool = state.model.tool;
+  state.model = model;
+  state.ur5eRange = next;
+  refreshJogLimits();
+  renderEditor();
+  updateStructure();
+});
 
 const poseName = element<HTMLInputElement>('pose-name');
 element<HTMLFormElement>('save-form').addEventListener('submit', event => {
@@ -507,8 +582,8 @@ function startMove(angles: readonly number[], name: string) {
       return;
     }
     moveFrame = 0;
-    if (movingToZero) zeroStatus.textContent = '영위치 이동 완료';
-    movingToZero = false;
+    if (referenceMove) zeroStatus.textContent = referenceMove + ' 이동 완료';
+    referenceMove = '';
     persist();
     poseButtons(false);
     setStatus(name + ' 이동 완료');
@@ -528,6 +603,14 @@ move.addEventListener('click', () => {
   }
   startMove(target.angles, target.name);
 });
+function moveToReference(angles: readonly number[], name: string) {
+  stopMove();
+  referenceMove = name;
+  zeroStatus.classList.remove('error');
+  zeroStatus.textContent = name + ' 이동 중';
+  startMove(angles, name);
+}
+
 zeroButton.addEventListener('click', () => {
   const blocked = zeroBlockedAxes(state.model);
   zeroStatus.classList.toggle('error', blocked.length > 0);
@@ -535,10 +618,10 @@ zeroButton.addEventListener('click', () => {
     zeroStatus.textContent = '0°가 한계 밖입니다 · ' + blocked.join(', ');
     return;
   }
-  stopMove();
-  movingToZero = true;
-  zeroStatus.textContent = '영위치 이동 중';
-  startMove(state.model.joints.map(() => 0), '영위치');
+  moveToReference(state.model.joints.map(() => 0), '관절 0°');
+});
+uprightButton.addEventListener('click', () => {
+  if (state.preset === 'ur5e') moveToReference(ur5eUprightAngles, '수직 기준 자세');
 });
 window.addEventListener('pagehide', persist);
 

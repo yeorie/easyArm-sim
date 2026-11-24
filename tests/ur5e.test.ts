@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { Matrix4, Vector3 } from 'three';
 import { radius, sample, solve, unit, zeroBlockedAxes } from '../src/kinematics.ts';
 import { ur5e } from '../src/ur5e.ts';
 import { readState, switchPreset } from '../src/storage.ts';
@@ -25,6 +26,37 @@ test('UR5e 상한 구는 베이스가 아니라 첫 관절을 중심으로 한�
   for (let i = 0; i < data.length; i += 3) {
     assert.ok(Math.hypot(data[i], data[i + 1], data[i + 2] - 162.5) <= radius(ur5e) + 1e-8);
   }
+});
+
+test('UR5e의 ROS 변환을 제조사 DH 파라미터와 256개 자세에서 대조한다', () => {
+  // Standard DH: Rz(theta) Tz(d) Tx(a) Rx(alpha). Manufacturer Base → ROS base_link is Rz(π).
+  const halfTurn = Math.PI;
+  const rightAngle = halfTurn / 2;
+  const dh = [
+    [0, 162.5, rightAngle], [-425, 0, 0], [-392.2, 0, 0],
+    [0, 133.3, rightAngle], [0, 99.7, -rightAngle], [0, 99.6, 0],
+  ];
+  let maxPosition = 0;
+  let maxDirection = 0;
+  for (let i = 0; i < 256; i++) {
+    const angles = ur5e.joints.map((joint, j) =>
+      (joint.max - joint.min) * (Math.sin((i + 1) * Math.sqrt(j + 3)) + 1) / 2 + joint.min);
+    const matrix = new Matrix4().makeRotationZ(halfTurn);
+    dh.forEach(([a, d, alpha], j) => {
+      matrix.multiply(new Matrix4().makeRotationZ(angles[j] * Math.PI / 180))
+        .multiply(new Matrix4().makeTranslation(a, 0, d))
+        .multiply(new Matrix4().makeRotationX(alpha));
+    });
+    const actual = solve(ur5e, angles);
+    maxPosition = Math.max(maxPosition, new Vector3().setFromMatrixPosition(matrix).distanceTo(actual.tcp));
+    for (const axis of [unit.X, unit.Y, unit.Z]) {
+      maxDirection = Math.max(maxDirection,
+        axis.clone().transformDirection(matrix).distanceTo(axis.clone().applyQuaternion(actual.toolOrientation)));
+    }
+  }
+  console.log(JSON.stringify({ poses: 256, maxPositionMm: maxPosition, maxDirectionError: maxDirection }));
+  assert.ok(maxPosition < 1e-5);
+  assert.ok(maxDirection < 1e-7);
 });
 
 test('영위치가 한계를 벗어난 축만 표시한다', () => {

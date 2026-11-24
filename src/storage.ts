@@ -1,7 +1,7 @@
 import { axes, clampAngle, type Axis, type Pose, type Robot } from './kinematics.ts';
 import { example, initialAngles } from './example.ts';
 import { targetLimit, type Target } from './workspace.ts';
-import { ur5e, ur5eInitialAngles } from './ur5e.ts';
+import { makeUr5e, ur5eInitialAngles, type Ur5eRange } from './ur5e.ts';
 
 export const storageKey = 'easyArm-sim:v1';
 export const maxJoints = 24;
@@ -17,6 +17,7 @@ export interface State {
   preset: Preset;
   custom?: CustomArm;
   ur5e?: { angles: number[]; tool: number };
+  ur5eRange: Ur5eRange;
   display: { sphere: boolean; points: boolean; frames: boolean; slice: boolean; dummy: boolean; marks: boolean };
   target: Target;
 }
@@ -26,6 +27,7 @@ const defaults = (): State => ({
   angles: [...initialAngles],
   poses: [],
   preset: 'custom',
+  ur5eRange: 'sw5',
   display: { sphere: false, points: false, frames: false, slice: true, dummy: true, marks: true },
   target: { x: 350, y: 0, height: 100 },
 });
@@ -42,15 +44,25 @@ function customArm(model: Robot, angles: number[]): CustomArm | undefined {
         isAxis(joint.axis) && isAxis(joint.direction) &&
         inRange(joint.min, -maxAngle, maxAngle) && inRange(joint.max, joint.min, maxAngle) &&
         inRange(joint.length, 0, maxLength) && inRange(joint.offset, -maxLength, maxLength))) return;
+  const oldFactoryArm = model.joints.length === example.joints.length && model.joints.every((joint, index) => {
+    const reference = example.joints[index];
+    return joint.id === reference.id && joint.axis === reference.axis && joint.direction === reference.direction &&
+      joint.length === reference.length && joint.min === reference.min && joint.max === reference.max &&
+      joint.offset === (index === 2 ? -48 : reference.offset);
+  });
+  if (oldFactoryArm) model.joints[2].offset = example.joints[2].offset;
+  const oldStart = [18, 38, -66, 22, 64, -20];
+  const unchangedStart = oldFactoryArm && Array.isArray(angles) &&
+    angles.length === oldStart.length && oldStart.every((value, index) => angles[index] === value);
   return {
     model,
-    angles: model.joints.map((joint, i) =>
+    angles: unchangedStart ? [...initialAngles] : model.joints.map((joint, i) =>
       clampAngle(Number.isFinite(angles?.[i]) ? angles[i] : 0, joint)),
   };
 }
 
 function restoreUr5e(state: State, angles: number[] | undefined, tool: number | undefined) {
-  state.model = structuredClone(ur5e);
+  state.model = makeUr5e(state.ur5eRange);
   if (typeof tool === 'number' && inRange(tool, 0, maxLength)) state.model.tool = tool;
   state.angles = state.model.joints.map((joint, i) =>
     clampAngle(angles && Number.isFinite(angles[i]) ? angles[i] : ur5eInitialAngles[i], joint));
@@ -76,6 +88,9 @@ export function readState(): State {
     const value: State | null = JSON.parse(localStorage.getItem(storageKey) ?? 'null');
     if (!value) return fallback;
     const { model, angles, poses, display, target } = value;
+    const previousElbow = value.preset === 'ur5e' ? angles?.[2] : value.ur5e?.angles?.[2];
+    if (value.ur5eRange === 'sw5' || value.ur5eRange === 'polyscope-x') fallback.ur5eRange = value.ur5eRange;
+    else if (typeof previousElbow === 'number' && Math.abs(previousElbow) > 160) fallback.ur5eRange = 'polyscope-x';
     if (value.preset === 'ur5e') {
       fallback.preset = 'ur5e';
       restoreUr5e(fallback, angles, model?.tool);
