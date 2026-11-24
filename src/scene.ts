@@ -1,6 +1,7 @@
 import * as T from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { axes, radius, sample, unit, type Axis, type Robot, type solve } from './kinematics.ts';
+import { axes, radius, unit, type Axis, type Robot, type solve } from './kinematics.ts';
+import { floorZ, gridExtent, gridSpacing, snapToGrid } from './workspace.ts';
 
 const colors = { X: 0xf47778, Y: 0x62cf9b, Z: 0x78aaff };
 const up = unit.Y;
@@ -44,7 +45,39 @@ function lattice() {
   return new T.BufferGeometry().setAttribute('position', new T.Float32BufferAttribute(vertices, 3));
 }
 
-export function createScene(host: HTMLElement) {
+function tableGrid() {
+  const light: number[] = [];
+  const dark: number[] = [];
+  for (let position = -gridExtent; position <= gridExtent; position += gridSpacing) {
+    const lines = position % 100 === 0 ? light : dark;
+    lines.push(-gridExtent, position, floorZ, gridExtent, position, floorZ);
+    lines.push(position, -gridExtent, floorZ, position, gridExtent, floorZ);
+  }
+  function lines(positions: number[], color: number, opacity: number) {
+    const geometry = new T.BufferGeometry().setAttribute('position', new T.Float32BufferAttribute(positions, 3));
+    return new T.LineSegments(geometry, new T.LineBasicMaterial({ color, transparent: true, opacity }));
+  }
+  const grid = new T.Group();
+  grid.add(lines(light, 0x66798e, 0.65), lines(dark, 0x4b6077, 0.39));
+  grid.add(
+    lines([-gridExtent, 0, floorZ, gridExtent, 0, floorZ], colors.X, 0.57),
+    lines([0, -gridExtent, floorZ, 0, gridExtent, floorZ], colors.Y, 0.57),
+  );
+  for (const value of [-750, -500, -250, 250, 500, 750]) {
+    const x = new T.Sprite(labelTexture(String(value), colors.X));
+    const y = new T.Sprite(labelTexture(String(value), colors.Y));
+    x.position.set(value, -27, floorZ + 4);
+    y.position.set(-27, value, floorZ + 4);
+    x.scale.set(64, 32, 1);
+    y.scale.copy(x.scale);
+    // Keep table labels behind arm geometry.
+    x.material.depthTest = y.material.depthTest = true;
+    grid.add(x, y);
+  }
+  return grid;
+}
+
+export function createScene(host: HTMLElement, selectTarget: (x: number, y: number) => void) {
   const renderer = new T.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setClearColor(0x0c1016);
@@ -75,7 +108,11 @@ export function createScene(host: HTMLElement) {
   const toolMaterial = material(0xcfd9e3);
   const cylinder = new T.CylinderGeometry(1, 1, 1, 32);
   const linkBody = new T.CylinderGeometry(0.82, 1, 1, 12);
-  const axisMaterials = { X: new T.MeshBasicMaterial({ color: colors.X }), Y: new T.MeshBasicMaterial({ color: colors.Y }), Z: new T.MeshBasicMaterial({ color: colors.Z }) };
+  const axisMaterials = {
+    X: new T.MeshBasicMaterial({ color: colors.X, depthTest: false }),
+    Y: new T.MeshBasicMaterial({ color: colors.Y, depthTest: false }),
+    Z: new T.MeshBasicMaterial({ color: colors.Z, depthTest: false }),
+  };
   const axisLabels = Object.fromEntries(axes.map(a => [a, labelTexture(a, colors[a])])) as Record<Axis, T.SpriteMaterial>;
 
   function disc(radiusMm: number, height: number, z: number, surface: T.Material) {
@@ -90,11 +127,7 @@ export function createScene(host: HTMLElement) {
   platform.add(disc(91, 15, -53, trim), disc(84, 24, -36, body), disc(63, 17, -16, gray), disc(59, 5, -6, trim));
   scene.add(platform);
 
-  const grid = new T.GridHelper(2, 28, 0x394454, 0x26303c);
-  grid.rotation.x = Math.PI / 2;
-  grid.material.transparent = true;
-  grid.material.opacity = 0.46;
-  scene.add(grid);
+  scene.add(tableGrid());
 
   const shell = new T.LineSegments(lattice(), new T.LineBasicMaterial({
     color: 0x7189a3, transparent: true, opacity: 0.24, depthWrite: false,
@@ -102,13 +135,28 @@ export function createScene(host: HTMLElement) {
   const points = new T.Points(new T.BufferGeometry(), new T.PointsMaterial({
     color: 0x7ed2ff, transparent: true, opacity: 0.46, size: 1.7, sizeAttenuation: false, depthWrite: false,
   }));
-  scene.add(shell, points);
+  const slice = new T.Points(new T.BufferGeometry(), new T.PointsMaterial({
+    color: 0x85cfff, transparent: true, opacity: 0.8, size: 3, sizeAttenuation: false, depthWrite: false,
+  }));
+  scene.add(shell, points, slice);
+
+  const target = new T.Group();
+  const targetMaterial = new T.MeshBasicMaterial({ color: 0xf3c070 });
+  const targetDot = new T.Mesh(new T.SphereGeometry(8, 18, 12), targetMaterial);
+  const targetRing = new T.Mesh(new T.RingGeometry(10, 14, 32), new T.MeshBasicMaterial({
+    color: 0xf3c070, side: T.DoubleSide,
+  }));
+  const targetStem = new T.Mesh(cylinder, targetMaterial);
+  const targetLabel = new T.Sprite(labelTexture('목표', 0xf3c070));
+  targetLabel.scale.set(72, 36, 1);
+  target.add(targetDot, targetRing, targetStem, targetLabel);
+  scene.add(target);
 
   function axisFrame(size: number) {
     const frame = new T.Group();
     for (const axis of axes) {
       const vector = unit[axis];
-      const arrow = new T.ArrowHelper(vector, new T.Vector3(), size, colors[axis], size * 0.19, size * 0.09);
+      const arrow = new T.ArrowHelper(vector, new T.Vector3(), size, colors[axis], size * 0.24, size * 0.13);
       const label = new T.Sprite(axisLabels[axis]);
       label.position.copy(vector).multiplyScalar(size + 12);
       label.scale.set(43, 21.5, 1);
@@ -118,7 +166,7 @@ export function createScene(host: HTMLElement) {
     return frame;
   }
 
-  const base = axisFrame(112);
+  const base = axisFrame(137);
   const baseLabel = new T.Sprite(labelTexture('BASE', 0x9daebf));
   baseLabel.position.set(-65, -28, 14);
   baseLabel.scale.set(62, 31, 1);
@@ -140,16 +188,18 @@ export function createScene(host: HTMLElement) {
   const tool = new T.Mesh(cylinder, toolMaterial);
   scene.add(tool);
   const highlight = new T.Mesh(cylinder, axisMaterials.Z);
-  scene.add(highlight);
+  const highlightHead = new T.Mesh(new T.ConeGeometry(9, 22, 20), axisMaterials.Z);
+  highlight.renderOrder = highlightHead.renderOrder = 3;
+  scene.add(highlight, highlightHead);
   const selectedTag = new T.Sprite();
   selectedTag.scale.set(64, 32, 1);
   selectedTag.renderOrder = 4;
   scene.add(selectedTag);
-  const jointLabels = new Map<number, T.SpriteMaterial>();
+  const jointLabels = new Map<string, T.SpriteMaterial>();
   const chain = new T.Group();
   scene.add(chain);
   const visuals: {
-    body: T.Mesh; cap: T.Mesh; collar: T.Mesh; insert: T.Mesh; link: T.Mesh; frame: T.Group;
+    body: T.Mesh; cap: T.Mesh; collar: T.Mesh; insert: T.Mesh; link: T.Mesh; neck: T.Mesh; frame: T.Group;
   }[] = [];
 
   function segment(mesh: T.Mesh, a: T.Vector3, b: T.Vector3, width: number) {
@@ -172,13 +222,14 @@ export function createScene(host: HTMLElement) {
     });
   }
 
-  function fit() {
+  function fit(top = false) {
     // Fit the bound in both dimensions. Keep the optical center slightly above the base.
     const vertical = T.MathUtils.degToRad(camera.fov / 2);
     const halfAngle = Math.min(vertical, Math.atan(Math.tan(vertical) * camera.aspect));
-    const distance = Math.max(210, extent * 1.24 / Math.sin(halfAngle));
+    const distance = Math.max(210, extent * (top ? 1.1 : 1.28) / Math.sin(halfAngle));
     controls.target.set(0, 0, extent * 0.035);
-    camera.position.copy(controls.target).addScaledVector(new T.Vector3(0.66, -1, 0.48).normalize(), distance);
+    const direction = top ? new T.Vector3(0, -0.0001, 1) : new T.Vector3(0.78, -1, 0.67);
+    camera.position.copy(controls.target).addScaledVector(direction.normalize(), distance);
     controls.update();
     draw();
   }
@@ -200,7 +251,8 @@ export function createScene(host: HTMLElement) {
         collar: new T.Mesh(cylinder, body),
         insert: new T.Mesh(cylinder, gray),
         link: new T.Mesh(linkBody, body),
-        frame: axisFrame(49),
+        neck: new T.Mesh(cylinder, gray),
+        frame: axisFrame(71),
       };
       visuals.push(visual);
       chain.add(...Object.values(visual));
@@ -214,21 +266,34 @@ export function createScene(host: HTMLElement) {
     }
     extent = Math.max(85, radius(model));
     shell.scale.setScalar(radius(model));
-    grid.scale.setScalar(extent * 1.72);
-    grid.position.z = -62;
+    draw();
+  }
+
+  function setSamples(samples: Float64Array) {
     points.geometry.dispose();
     points.geometry = new T.BufferGeometry();
-    points.geometry.setAttribute('position', new T.Float32BufferAttribute(sample(model), 3));
+    points.geometry.setAttribute('position', new T.Float32BufferAttribute(samples, 3));
+    draw();
+  }
+
+  function setTarget([x, y, z]: [number, number, number], samplesAtHeight: Float32Array) {
+    targetDot.position.set(x, y, z);
+    targetRing.position.set(x, y, floorZ + 0.6);
+    segment(targetStem, targetRing.position, targetDot.position, 1.5);
+    targetLabel.position.set(x, y, z + 25);
+    slice.geometry.dispose();
+    slice.geometry = new T.BufferGeometry();
+    slice.geometry.setAttribute('position', new T.BufferAttribute(samplesAtHeight, 3));
     draw();
   }
 
   function update(model: Robot, solved: ReturnType<typeof solve>, selected: number, display: {
-    sphere: boolean; points: boolean; frames: boolean;
+    sphere: boolean; points: boolean; frames: boolean; slice: boolean;
   }) {
     for (const [i, frame] of solved.frames.entries()) {
       const visual = visuals[i];
       const joint = model.joints[i];
-      const width = i === 0 ? 51 : i === 1 ? 45 : i === 2 ? 38 : i === 3 ? 30 : 24;
+      const width = [52, 44, 38, 29, 23, 17][i] ?? 17;
       const spindle = unit[joint.axis].clone().applyQuaternion(frame.orientation);
       visual.body.material = i === selected ? active : gray;
       segment(visual.body, frame.origin.clone().addScaledVector(spindle, -width * 0.48),
@@ -239,29 +304,51 @@ export function createScene(host: HTMLElement) {
         frame.origin.clone().addScaledVector(spindle, width * 0.66), width * 0.70);
       segment(visual.insert, frame.origin.clone().addScaledVector(spindle, -width * 0.71),
         frame.origin.clone().addScaledVector(spindle, width * 0.71), width * 0.26);
-      segment(visual.link, frame.origin, frame.end, width * 0.76);
+      const linkLength = frame.origin.distanceTo(frame.end);
+      const trimFraction = Math.min(0.30, width / Math.max(linkLength, 1) * 0.75);
+      segment(visual.neck, frame.origin, frame.end, width * 0.36);
+      segment(visual.link, frame.origin.clone().lerp(frame.end, trimFraction),
+        frame.end.clone().lerp(frame.origin, trimFraction), width * 0.66);
       visual.frame.position.copy(frame.origin);
       visual.frame.quaternion.copy(frame.orientation);
       visual.frame.visible = display.frames;
       if (i === selected) {
         highlight.material = axisMaterials[joint.axis];
-        segment(highlight, frame.origin.clone().addScaledVector(spindle, -width - 16),
-          frame.origin.clone().addScaledVector(spindle, width + 16), 2.8);
-        if (!jointLabels.has(i)) jointLabels.set(i, labelTexture('J' + (i + 1), 0xd6eaff));
-        selectedTag.material = jointLabels.get(i)!;
-        selectedTag.position.copy(frame.origin).addScaledVector(spindle, width + 30);
+        highlightHead.material = highlight.material;
+        segment(highlight, frame.origin.clone().addScaledVector(spindle, -width * 0.7),
+          frame.origin.clone().addScaledVector(spindle, width + 45), 3.8);
+        highlightHead.position.copy(frame.origin).addScaledVector(spindle, width + 52);
+        highlightHead.quaternion.setFromUnitVectors(up, spindle);
+        const tag = 'J' + (i + 1) + ' ' + joint.axis;
+        if (!jointLabels.has(tag)) jointLabels.set(tag, labelTexture(tag, colors[joint.axis]));
+        selectedTag.material = jointLabels.get(tag)!;
+        selectedTag.position.copy(frame.origin).addScaledVector(spindle, width + 83);
       }
     }
     segment(tool, solved.frames[solved.frames.length - 1].end, solved.tcp, 12);
     tcp.position.copy(solved.tcp);
     shell.visible = display.sphere && radius(model) > 0;
     points.visible = display.points;
+    slice.visible = display.slice;
     draw();
   }
 
   controls.addEventListener('change', draw);
+  const picker = new T.Raycaster();
+  const plate = new T.Plane(unit.Z, -floorZ);
+  renderer.domElement.addEventListener('dblclick', event => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const cursor = new T.Vector2((event.clientX - rect.left) / rect.width * 2 - 1,
+      1 - (event.clientY - rect.top) / rect.height * 2);
+    camera.updateMatrixWorld();
+    picker.setFromCamera(cursor, camera);
+    const hit = picker.ray.intersectPlane(plate, new T.Vector3());
+    if (hit && Math.abs(hit.x) <= gridExtent && Math.abs(hit.y) <= gridExtent) {
+      selectTarget(snapToGrid(hit.x), snapToGrid(hit.y));
+    }
+  });
   new ResizeObserver(resize).observe(host);
   resize();
 
-  return { rebuild, update, fit };
+  return { rebuild, update, fit, setSamples, setTarget };
 }

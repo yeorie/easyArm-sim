@@ -34,7 +34,10 @@
         <div id="scene" class="scene"></div>
         <div class="view-top">
           <div class="view-label"><span class="live-dot"></span>3D 뷰 <span class="muted">Z-up</span></div>
-          <button type="button" id="fit" class="secondary">전체 보기</button>
+          <div class="view-actions">
+            <button type="button" id="top-view" class="secondary">위에서</button>
+            <button type="button" id="fit" class="secondary">전체 보기</button>
+          </div>
         </div>
         <div class="view-floor">
           <div class="view-strip">
@@ -49,13 +52,25 @@
             <div class="mouse-guide">드래그 회전 · 휠 확대 · 우클릭 드래그 이동</div>
           </div>
           <div class="workspace">
-            <div class="workspace-heading"><h2>작업공간</h2><output id="bound"></output></div>
-            <div class="layers">
-              <label><input type="checkbox" id="sphere" /> 도달 반경 상한</label>
-              <label><input type="checkbox" id="points" /> TCP 점군</label>
-              <label><input type="checkbox" id="frames" /> 관절 좌표계</label>
+            <div class="workspace-heading"><h2>작업공간 · 정반 25 mm 격자</h2><span class="muted">반경 상한 <output id="bound"></output></span></div>
+            <div class="target-fields">
+              <label class="field">목표 X <input type="number" id="target-x" min="-10000" max="10000" step="any" /></label>
+              <label class="field">목표 Y <input type="number" id="target-y" min="-10000" max="10000" step="any" /></label>
+              <label class="field">정반 위 높이 <input type="number" id="target-height" min="0" max="10000" step="any" /></label>
+              <div class="target-result">
+                <span class="muted">거리 · mm</span>
+                <span>현재 TCP <output id="target-current"></output></span>
+                <span>가장 가까운 표본 <output id="target-nearest"></output></span>
+              </div>
             </div>
-            <p class="hint">격자 구는 첫 관절 기준 거리 상한입니다. 점군은 관절 한계 내 표본이며, 점이 드문 곳의 도달 여부는 판단할 수 없습니다.</p>
+            <p class="hint" id="target-hint"></p>
+            <div class="layers">
+              <label><input type="checkbox" id="slice" /> 목표 높이 단면</label>
+              <label><input type="checkbox" id="points" /> 전체 TCP 점군</label>
+              <label><input type="checkbox" id="sphere" /> 도달 반경 상한</label>
+              <label><input type="checkbox" id="frames" /> 모든 관절 좌표계</label>
+            </div>
+            <p class="hint">정반을 더블클릭해 목표 선택 · 큰 눈금 100 mm · 단면 표본만으로 도달 여부를 확정할 수 없습니다.</p>
           </div>
         </div>
       </section>

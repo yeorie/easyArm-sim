@@ -30,14 +30,35 @@ try {
   await page.goto(url);
   await page.locator('canvas').waitFor();
   await countJoints(6);
-  assert.equal(await page.locator('#sphere').isChecked(), true);
+  assert.equal(await page.locator('#sphere').isChecked(), false);
+  assert.equal(await page.locator('#slice').isChecked(), true);
   assert.equal(await page.locator('.scene-error').count(), 0);
   const beforeView = await page.locator('canvas').screenshot();
   if (process.env.EASYARM_SCREENSHOT) await page.screenshot({ path: process.env.EASYARM_SCREENSHOT });
 
+  await page.locator('#sphere').check();
+  const sphereView = await page.locator('canvas').screenshot();
+  assert.notDeepEqual(sphereView, beforeView, '상한 구 토글이 렌더링을 바꾼다');
+  await page.locator('#sphere').uncheck();
+  await page.locator('#top-view').click();
+  const plate = await page.locator('canvas').boundingBox();
+  await page.locator('canvas').dblclick({ position: { x: plate.width * 0.56, y: plate.height * 0.47 } });
+  assert.notEqual(await field('#target-x'), '350');
+  assert.equal(Math.abs(Number(await field('#target-x')) % 25), 0);
+  assert.equal(Math.abs(Number(await field('#target-y')) % 25), 0);
+  await page.locator('#fit').click();
+  await setField('#target-height', 300);
+  assert.match(await read('#target-hint'), /Z 238 mm/);
+  await setField('#target-x', 2000);
+  assert.match(await read('#target-hint'), /반경 상한 밖/);
+  await setField('#target-x', 350);
+  assert.doesNotMatch(await read('#target-hint'), /반경 상한 밖/);
+  const workspaceDistance = await read('#target-nearest');
+  const targetDistance = await read('#target-current');
+  const beforeFrames = await page.locator('canvas').screenshot();
   await page.locator('#frames').check();
   const framesView = await page.locator('canvas').screenshot();
-  assert.notDeepEqual(framesView, beforeView, '좌표계 토글이 렌더링을 바꾼다');
+  assert.notDeepEqual(framesView, beforeFrames, '좌표계 토글이 렌더링을 바꾼다');
   await page.locator('#points').check();
   const pointView = await page.locator('canvas').screenshot();
   assert.notDeepEqual(pointView, framesView, '점군 토글이 렌더링을 바꾼다');
@@ -52,6 +73,8 @@ try {
   await page.mouse.up();
   assert.notDeepEqual(await tcp(), beforeJog);
   assert.equal(await read('#bound'), boundBefore);
+  assert.equal(await read('#target-nearest'), workspaceDistance);
+  assert.notEqual(await read('#target-current'), targetDistance);
   assert.deepEqual(await page.locator('canvas').getAttribute('aria-label'), '3D 로봇팔과 작업공간');
 
   for (const joint of [2, 3]) {
@@ -94,6 +117,7 @@ try {
   assert.notDeepEqual(jogged, saved);
   await page.reload();
   await countJoints(4);
+  assert.equal(await field('#target-height'), '300');
   assert.deepEqual(await allAngles(), jogged);
   assert.equal(await page.locator('#pose-select option').last().innerText(), '홈');
   await page.locator('#pose-select').selectOption({ label: '홈' });

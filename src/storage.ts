@@ -1,5 +1,6 @@
 import { axes, clampAngle, type Axis, type Pose, type Robot } from './kinematics.ts';
 import { example, initialAngles } from './example.ts';
+import { targetLimit, type Target } from './workspace.ts';
 
 export const storageKey = 'easyArm-sim:v1';
 export const maxJoints = 24;
@@ -10,14 +11,16 @@ export interface State {
   model: Robot;
   angles: number[];
   poses: Pose[];
-  display: { sphere: boolean; points: boolean; frames: boolean };
+  display: { sphere: boolean; points: boolean; frames: boolean; slice: boolean };
+  target: Target;
 }
 
 const defaults = (): State => ({
   model: structuredClone(example),
   angles: [...initialAngles],
   poses: [],
-  display: { sphere: true, points: false, frames: false },
+  display: { sphere: false, points: false, frames: false, slice: true },
+  target: { x: 350, y: 0, height: 100 },
 });
 
 const isAxis = (value: unknown): value is Axis => axes.includes(value as Axis);
@@ -29,7 +32,7 @@ export function readState(): State {
   try {
     const value: State | null = JSON.parse(localStorage.getItem(storageKey) ?? 'null');
     if (!value) return fallback;
-    const { model, angles, poses, display } = value;
+    const { model, angles, poses, display, target } = value;
     if (Array.isArray(model?.joints) && model.joints.length >= 1 && model.joints.length <= maxJoints &&
         inRange(model.tool, 0, maxLength) &&
         new Set(model.joints.map(joint => joint?.id)).size === model.joints.length &&
@@ -47,9 +50,12 @@ export function readState(): State {
         pose.joints.every(joint => Array.isArray(joint) && typeof joint[0] === 'string' && isAxis(joint[1])) &&
         pose.angles.every(angle => inRange(angle, -maxAngle, maxAngle)));
     }
-    if (display && (['sphere', 'points', 'frames'] as const).every(key =>
-      typeof display[key] === 'boolean')) {
-      fallback.display = display;
+    for (const key of ['sphere', 'points', 'frames', 'slice'] as const) {
+      if (typeof display?.[key] === 'boolean') fallback.display[key] = display[key];
+    }
+    if (target && inRange(target.x, -targetLimit, targetLimit) && inRange(target.y, -targetLimit, targetLimit) &&
+        inRange(target.height, 0, targetLimit)) {
+      fallback.target = target;
     }
   } catch {
     // A blocked browser store or an unreadable record falls back to the example.

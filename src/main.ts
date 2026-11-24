@@ -1,7 +1,8 @@
 import './style.css';
-import { axes, clampAngle, interpolate, offsetAxis, poseProblem, radius, solve, type Axis } from './kinematics.ts';
+import { axes, clampAngle, interpolate, offsetAxis, poseProblem, radius, sample, solve, type Axis } from './kinematics.ts';
 import { createScene } from './scene.ts';
 import { maxAngle, maxJoints, maxLength, readState, storageKey } from './storage.ts';
+import { nearestDistance, slicePoints, sliceTolerance, targetPosition } from './workspace.ts';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const state = readState();
@@ -14,6 +15,7 @@ const removePose = element<HTMLButtonElement>('delete-pose');
 const add = element<HTMLButtonElement>('add-joint');
 const tool = element<HTMLInputElement>('tool-length');
 const fit = element<HTMLButtonElement>('fit');
+const topView = element<HTMLButtonElement>('top-view');
 const status = element('status');
 const sceneHost = element('scene');
 const coordinates = ['tcp-x', 'tcp-y', 'tcp-z'].map(id => element<HTMLOutputElement>(id));
@@ -22,14 +24,24 @@ const jogFields: { range: HTMLInputElement; angle: HTMLInputElement }[] = [];
 let activeJoint = 0;
 let scene: ReturnType<typeof createScene> | undefined;
 let moveFrame = 0;
+let workspaceSamples: Float64Array = new Float64Array(0);
 try {
-  scene = createScene(sceneHost);
+  scene = createScene(sceneHost, (x, y) => {
+    state.target.x = x;
+    state.target.y = y;
+    element<HTMLInputElement>('target-x').value = String(x);
+    element<HTMLInputElement>('target-y').value = String(y);
+    refreshTarget();
+    updatePose();
+    persist();
+  });
 } catch {
   const error = document.createElement('p');
   error.className = 'scene-error';
   error.textContent = '3D 뷰를 열 수 없습니다. WebGL2를 지원하는 브라우저에서 하드웨어 가속을 확인해 주세요.';
   sceneHost.append(error);
   fit.disabled = true;
+  topView.disabled = true;
 }
 
 function persist() {
@@ -90,7 +102,19 @@ function updatePose(skipAngle?: HTMLInputElement) {
   solved.tcp.toArray().forEach((value, i) => {
     coordinates[i].value = (Math.abs(value) < 0.05 ? 0 : value).toFixed(1);
   });
+  const [x, y, z] = targetPosition(state.target);
+  element<HTMLOutputElement>('target-current').value = Math.hypot(solved.tcp.x - x, solved.tcp.y - y, solved.tcp.z - z).toFixed(1);
   scene?.update(state.model, solved, activeJoint, state.display);
+}
+
+function refreshTarget() {
+  const position = targetPosition(state.target);
+  const z = position[2];
+  const slice = slicePoints(workspaceSamples, z);
+  element<HTMLOutputElement>('target-nearest').value = nearestDistance(workspaceSamples, position).toFixed(1);
+  const outside = Math.hypot(...position) > radius(state.model) + 1e-8 ? ' · 반경 상한 밖' : '';
+  element('target-hint').textContent = `베이스 기준 목표 Z ${Number(z.toFixed(2))} mm${outside} · 단면 ±${sliceTolerance} mm · ${slice.length / 3}점`;
+  scene?.setTarget(position, slice);
 }
 
 function updateStructure(topologyChanged = false) {
@@ -99,7 +123,10 @@ function updateStructure(topologyChanged = false) {
   if (topologyChanged) renderJointList();
   else state.model.joints.forEach((joint, i) => { list.children[i].children[2].textContent = joint.length + ' mm'; });
   renderPoses();
+  workspaceSamples = sample(state.model);
   scene?.rebuild(state.model);
+  scene?.setSamples(workspaceSamples);
+  refreshTarget();
   updatePose();
   persist();
 }
@@ -329,7 +356,17 @@ numericCommit(tool, () => state.model.tool, value => {
   // Restore the last valid length; the native input exposes its numeric range.
 });
 
-for (const key of ['sphere', 'points', 'frames'] as const) {
+for (const key of ['x', 'y', 'height'] as const) {
+  const input = element<HTMLInputElement>('target-' + key);
+  input.value = String(state.target[key]);
+  numericCommit(input, () => state.target[key], value => {
+    state.target[key] = value;
+    refreshTarget();
+    updatePose();
+    persist();
+  }, () => {});
+}
+for (const key of ['sphere', 'points', 'frames', 'slice'] as const) {
   const checkbox = element<HTMLInputElement>(key);
   checkbox.checked = state.display[key];
   checkbox.addEventListener('change', () => {
@@ -339,6 +376,7 @@ for (const key of ['sphere', 'points', 'frames'] as const) {
   });
 }
 fit.addEventListener('click', () => scene?.fit());
+topView.addEventListener('click', () => scene?.fit(true));
 
 const poseName = element<HTMLInputElement>('pose-name');
 element<HTMLFormElement>('save-form').addEventListener('submit', event => {
