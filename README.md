@@ -2,19 +2,32 @@
 
 직렬 회전관절 로봇팔의 정기구학을 조작하며 설계 변경과 도달 범위를 확인하는 한국어 3D 앱입니다.
 
-## 시작하기
+**[브라우저에서 easyArm-sim 실행](https://yeorie.github.io/easyArm-sim/)** · [배포 이력](https://github.com/yeorie/easyArm-sim/actions/workflows/pages.yml)
 
-Node.js 24 이상과 WebGL2를 지원하는 브라우저가 필요합니다.
+웹 버전은 설치와 계정 없이 WebGL2를 지원하는 브라우저에서 실행됩니다. 오른쪽 슬라이더로 관절을 돌리거나, 왼쪽 **예제 불러오기**에서 UR5e를 선택할 수 있습니다.
+
+## 로컬 실행
+
+Node.js 24 이상이 설치된 환경에서 실행합니다.
 
 ```sh
+git clone https://github.com/yeorie/easyArm-sim.git
+cd easyArm-sim
 npm ci
 npm run dev
+```
+
+터미널에 표시되는 `Local` 주소를 브라우저로 엽니다. Windows PowerShell에서 npm 실행이 제한되면 위 명령의 `npm` 대신 `npm.cmd`를 사용합니다.
+
+## 테스트와 배포
+
+```sh
 npm test
 npm run build
 npm run preview
 ```
 
-`dist/`를 정적 호스팅에 올리면 됩니다. GitHub Pages에서는 Settings → Pages → Source에서 GitHub Actions를 선택합니다. `main`에 푸시하면 워크플로가 테스트 후 `dist/`만 배포합니다.
+`main`에 푸시하면 GitHub Actions가 테스트 후 정적 빌드 결과인 `dist/`를 GitHub Pages에 배포합니다. 로컬 배포본의 기본 미리보기 주소는 `http://localhost:4173/easyArm-sim/`입니다.
 
 ## 축과 단위
 
@@ -40,6 +53,14 @@ UR5e 출처는 [Universal Robots ROS 2 Description의 고정 커밋](https://git
 - 격자 구는 첫 관절을 중심으로 각 링크 변위의 크기와 공구 길이를 더한 거리 상한입니다. 기본 화면에서는 끈 상태로 시작하며 작업공간에서 켤 수 있습니다.
 - 저장 자세는 관절각과 관절 구성 식별값을 함께 보관합니다. 동일한 관절 구성에서 링크와 공구 길이를 수정한 뒤에도 사용할 수 있습니다. MoveJ는 공통 시간 비율로 각 축을 보간합니다.
 - 팔 설정, 현재 각도, 목표 위치, 표시 설정과 저장 자세는 브라우저의 `localStorage`에 `easyArm-sim:v1` 키로 저장됩니다. 브라우저 프로필과 사이트 주소별로 저장됩니다.
+
+## 데이터와 라이선스
+
+앱은 브라우저에서 계산합니다. UR5e 외형도 사이트와 함께 제공하며, 자세나 설정을 서버에 전송하는 기능은 없습니다.
+
+- three.js는 [MIT 라이선스](public/licenses/three-MIT.txt)를 따릅니다.
+- UR5e의 기구학 데이터와 외형에는 [Universal Robots의 BSD-3-Clause 라이선스](public/licenses/ur-description-BSD-3-Clause.txt)가 적용됩니다.
+- easyArm-sim 자체 소스의 재배포 라이선스는 미지정입니다.
 
 ## 브라우저 검증
 
