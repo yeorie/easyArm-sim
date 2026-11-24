@@ -1,7 +1,7 @@
 import './style.css';
-import { axes, clampAngle, interpolate, offsetAxis, poseProblem, radius, sample, solve, type Axis } from './kinematics.ts';
-import { createScene } from './scene.ts';
-import { maxAngle, maxJoints, maxLength, readState, storageKey } from './storage.ts';
+import { axes, clampAngle, interpolate, offsetAxis, poseProblem, radius, sample, solve, zeroBlockedAxes, type Axis } from './kinematics.ts';
+import { createScene, type PointerMode } from './scene.ts';
+import { maxAngle, maxJoints, maxLength, readState, storageKey, switchPreset, type Preset } from './storage.ts';
 import { nearestDistance, slicePoints, sliceTolerance, targetPosition } from './workspace.ts';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -16,6 +16,9 @@ const add = element<HTMLButtonElement>('add-joint');
 const tool = element<HTMLInputElement>('tool-length');
 const fit = element<HTMLButtonElement>('fit');
 const topView = element<HTMLButtonElement>('top-view');
+const pointerMode = element<HTMLSelectElement>('pointer-mode');
+const zeroButton = element<HTMLButtonElement>('zero');
+const zeroStatus = element('zero-status');
 const status = element('status');
 const sceneHost = element('scene');
 const coordinates = ['tcp-x', 'tcp-y', 'tcp-z'].map(id => element<HTMLOutputElement>(id));
@@ -24,6 +27,7 @@ const jogFields: { range: HTMLInputElement; angle: HTMLInputElement }[] = [];
 let activeJoint = 0;
 let scene: ReturnType<typeof createScene> | undefined;
 let moveFrame = 0;
+let movingToZero = false;
 let workspaceSamples: Float64Array = new Float64Array(0);
 try {
   scene = createScene(sceneHost, (x, y) => {
@@ -34,6 +38,14 @@ try {
     refreshTarget();
     updatePose();
     persist();
+  }, index => {
+    stopMove(true);
+    setActive(index);
+  }, (index, delta) => {
+    const next = Number((state.angles[index] + delta).toFixed(4));
+    state.angles[index] = clampAngle(next, state.model.joints[index]);
+    updatePose();
+    persist();
   });
 } catch {
   const error = document.createElement('p');
@@ -42,6 +54,7 @@ try {
   sceneHost.append(error);
   fit.disabled = true;
   topView.disabled = true;
+  pointerMode.disabled = true;
 }
 
 function persist() {
@@ -87,9 +100,19 @@ function stopMove(manual = false) {
   if (!moveFrame) return;
   cancelAnimationFrame(moveFrame);
   moveFrame = 0;
+  if (movingToZero) {
+    zeroStatus.textContent = '영위치 이동 중단';
+    movingToZero = false;
+  }
   persist();
   poseButtons(false);
   setStatus(manual ? 'MoveJ 중단 · 수동 조작' : 'MoveJ 중단');
+}
+
+function showActiveAngle() {
+  const joint = state.model.joints[activeJoint];
+  const angle = Number(state.angles[activeJoint].toFixed(1));
+  element<HTMLOutputElement>('active-angle').value = `J${activeJoint + 1} · ${joint.axis} · ${angle}°`;
 }
 
 function updatePose(skipAngle?: HTMLInputElement) {
@@ -99,6 +122,7 @@ function updatePose(skipAngle?: HTMLInputElement) {
     if (fields.angle !== skipAngle) fields.angle.value = String(Number(angle.toFixed(4)));
   }
   const solved = solve(state.model, state.angles);
+  showActiveAngle();
   solved.tcp.toArray().forEach((value, i) => {
     coordinates[i].value = (Math.abs(value) < 0.05 ? 0 : value).toFixed(1);
   });
@@ -112,7 +136,9 @@ function refreshTarget() {
   const z = position[2];
   const slice = slicePoints(workspaceSamples, z);
   element<HTMLOutputElement>('target-nearest').value = nearestDistance(workspaceSamples, position).toFixed(1);
-  const outside = Math.hypot(...position) > radius(state.model) + 1e-8 ? ' · 반경 상한 밖' : '';
+  const center = state.model.origin ?? [0, 0, 0];
+  const outside = Math.hypot(...position.map((value, i) => value - center[i])) > radius(state.model) + 1e-8
+    ? ' · 반경 상한 밖' : '';
   element('target-hint').textContent = `베이스 기준 목표 Z ${Number(z.toFixed(2))} mm${outside} · 단면 ±${sliceTolerance} mm · ${slice.length / 3}점`;
   scene?.setTarget(position, slice);
 }
@@ -138,6 +164,7 @@ function setActive(index: number) {
   }
   Array.from(list.children).forEach((child, i) => child.setAttribute('aria-pressed', String(i === index)));
   Array.from(jog.children).forEach((child, i) => child.classList.toggle('active', i === index));
+  showActiveAngle();
   const solved = solve(state.model, state.angles);
   scene?.update(state.model, solved, activeJoint, state.display);
 }
@@ -152,11 +179,11 @@ function renderJointList() {
     button.innerHTML = '<strong></strong><span class="joint-name"></span><span></span>';
     button.children[0].textContent = 'J' + (index + 1);
     button.children[1].textContent = joint.name;
-    button.children[2].textContent = joint.length + ' mm';
+      button.children[2].textContent = Number(joint.length.toFixed(1)) + ' mm';
     button.addEventListener('click', () => setActive(index));
     list.append(button);
   });
-  add.disabled = state.model.joints.length >= maxJoints;
+  add.disabled = state.preset !== 'custom' || state.model.joints.length >= maxJoints;
 }
 
 function numericCommit(input: HTMLInputElement, read: () => number, apply: (value: number) => void, invalid: () => void) {
@@ -183,6 +210,13 @@ function renderEditor() {
   const i = activeJoint;
   const joint = state.model.joints[i];
   const label = i + 1 === state.model.joints.length ? '플랜지' : 'J' + (i + 2);
+  if (state.preset === 'ur5e') {
+    editor.innerHTML = `<div class="editor-heading"><h3>UR5e · J${i + 1} → ${label}</h3></div>
+      <p class="hint">로컬 ${joint.axis} 회전 · ${joint.min}° ~ ${joint.max}°</p>
+      <p class="hint">다음 원점 XYZ · ${joint.vector?.map(value => Number(value.toFixed(2))).join(' / ')} mm</p>
+      <p class="hint">공식 공칭 치수로 고정된 예제입니다.</p>`;
+    return;
+  }
   const options = axes.map(axis => '<option>' + axis + '</option>').join('');
   editor.innerHTML = `
     <div class="editor-heading">
@@ -333,7 +367,7 @@ function renderJog() {
 }
 
 add.addEventListener('click', () => {
-  if (state.model.joints.length >= maxJoints) return;
+  if (state.preset !== 'custom' || state.model.joints.length >= maxJoints) return;
   stopMove();
   state.model.joints.push({
     id: crypto.randomUUID(), name: '추가 관절', axis: 'Y', direction: 'Z',
@@ -366,7 +400,7 @@ for (const key of ['x', 'y', 'height'] as const) {
     persist();
   }, () => {});
 }
-for (const key of ['sphere', 'points', 'frames', 'slice'] as const) {
+for (const key of ['sphere', 'points', 'frames', 'slice', 'dummy', 'marks'] as const) {
   const checkbox = element<HTMLInputElement>(key);
   checkbox.checked = state.display[key];
   checkbox.addEventListener('change', () => {
@@ -377,6 +411,57 @@ for (const key of ['sphere', 'points', 'frames', 'slice'] as const) {
 }
 fit.addEventListener('click', () => scene?.fit());
 topView.addEventListener('click', () => scene?.fit(true));
+pointerMode.addEventListener('change', () => {
+  scene?.setMode(pointerMode.value as PointerMode);
+  element('pointer-hint').hidden = pointerMode.value !== 'jog';
+  element('mouse-guide').textContent = pointerMode.value === 'orbit' ?
+    '드래그 회전 · 휠 확대 · 우클릭 드래그 이동' :
+    pointerMode.value === 'locked' ? '시점 고정 중' : '드래그 조그 중';
+});
+scene?.setMode('orbit');
+
+const tabs = ['structure', 'example'] as const;
+function showTab(active: typeof tabs[number]) {
+  for (const name of tabs) {
+    const tab = element(name + '-tab');
+    tab.setAttribute('aria-selected', String(name === active));
+    tab.tabIndex = name === active ? 0 : -1;
+    element(name + '-panel').hidden = name !== active;
+  }
+}
+for (const [index, name] of tabs.entries()) {
+  const tab = element(name + '-tab');
+  tab.addEventListener('click', () => showTab(name));
+  tab.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[1] : tabs[1 - index];
+    showTab(next);
+    element(next + '-tab').focus();
+  });
+}
+function displayPreset() {
+  for (const preset of ['custom', 'ur5e'] as const) {
+    element<HTMLButtonElement>('load-' + preset).disabled = state.preset === preset;
+  }
+  element('structure-title').textContent = state.preset === 'ur5e' ? 'UR5e' : '팔 모델';
+}
+for (const preset of ['custom', 'ur5e'] as Preset[]) {
+  element('load-' + preset).addEventListener('click', () => {
+    stopMove();
+    switchPreset(state, preset);
+    activeJoint = 0;
+    tool.value = String(state.model.tool);
+    zeroStatus.textContent = '';
+    renderEditor();
+    renderJog();
+    updateStructure(true);
+    displayPreset();
+    showTab('structure');
+    element('structure-tab').focus();
+    scene?.fit();
+  });
+}
 
 const poseName = element<HTMLInputElement>('pose-name');
 element<HTMLFormElement>('save-form').addEventListener('submit', event => {
@@ -408,6 +493,31 @@ removePose.addEventListener('click', () => {
   setStatus(pose.name + ' 삭제 완료');
 });
 
+function startMove(angles: readonly number[], name: string) {
+  const from = [...state.angles];
+  const start = performance.now();
+  const largestChange = Math.max(...from.map((angle, i) => Math.abs(angle - angles[i])));
+  const duration = Math.min(3000, Math.max(550, largestChange / 100 * 1000));
+  function tick(now: number) {
+    const time = Math.min(1, (now - start) / duration);
+    state.angles = interpolate(from, angles, time);
+    updatePose();
+    if (time < 1) {
+      moveFrame = requestAnimationFrame(tick);
+      return;
+    }
+    moveFrame = 0;
+    if (movingToZero) zeroStatus.textContent = '영위치 이동 완료';
+    movingToZero = false;
+    persist();
+    poseButtons(false);
+    setStatus(name + ' 이동 완료');
+  }
+  moveFrame = requestAnimationFrame(tick);
+  poseButtons(false);
+  setStatus(name + ' 이동 중');
+}
+
 move.addEventListener('click', () => {
   const target = selectedPose();
   if (!target || moveFrame) return;
@@ -416,30 +526,24 @@ move.addEventListener('click', () => {
     setStatus(problem, true);
     return;
   }
-  const from = [...state.angles];
-  const start = performance.now();
-  const largestChange = Math.max(...from.map((angle, i) => Math.abs(angle - target.angles[i])));
-  const duration = Math.min(3000, Math.max(550, largestChange / 100 * 1000));
-  function tick(now: number) {
-    const time = Math.min(1, (now - start) / duration);
-    state.angles = interpolate(from, target!.angles, time);
-    updatePose();
-    if (time < 1) {
-      moveFrame = requestAnimationFrame(tick);
-      return;
-    }
-    moveFrame = 0;
-    persist();
-    poseButtons(false);
-    setStatus(target!.name + ' 이동 완료');
+  startMove(target.angles, target.name);
+});
+zeroButton.addEventListener('click', () => {
+  const blocked = zeroBlockedAxes(state.model);
+  zeroStatus.classList.toggle('error', blocked.length > 0);
+  if (blocked.length) {
+    zeroStatus.textContent = '0°가 한계 밖입니다 · ' + blocked.join(', ');
+    return;
   }
-  moveFrame = requestAnimationFrame(tick);
-  poseButtons(false);
-  setStatus(target.name + ' 이동 중');
+  stopMove();
+  movingToZero = true;
+  zeroStatus.textContent = '영위치 이동 중';
+  startMove(state.model.joints.map(() => 0), '영위치');
 });
 window.addEventListener('pagehide', persist);
 
 renderEditor();
 renderJog();
 updateStructure(true);
+displayPreset();
 scene?.fit();

@@ -58,6 +58,18 @@ h3 { font-size: 13px; font-weight: 650; }
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .panel-scroll { overflow: auto; padding: 12px 13px 17px; scrollbar-color: #3a495a transparent; }
+.model-tabs { display: flex; gap: 5px; margin-bottom: 9px; }
+.model-tabs button { flex: 1; background: var(--field); padding-inline: 5px; font-size: 11px; }
+.model-tabs button[aria-selected="true"] { border-color: #557696; background: #233448; }
+.preset-item { display: grid; gap: 3px; width: 100%; text-align: left; white-space: normal; background: #1d2835; margin-bottom: 6px; }
+.preset-item span { color: var(--muted); font-size: 11px; }
+.preset-item:disabled { opacity: 1; border-color: #4e7397; }
+.preset-license a { color: var(--accent); }
+.display-switch { display: flex; align-items: center; gap: 4px; margin-top: 5px; font-size: 11px; color: #b8c5d3; cursor: pointer; }
+.zero-actions { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 6px; }
+.zero-actions button { font-size: 11px; }
+.zero-actions .display-switch { margin: 0; white-space: nowrap; }
+#zero-status { margin-bottom: 6px; }
 .joint-list { display: grid; gap: 4px; }
 .joint-choice {
   min-width: 0; display: grid; align-items: center; grid-template-columns: 26px minmax(0, 1fr) max-content;
@@ -90,6 +102,12 @@ h3 { font-size: 13px; font-weight: 650; }
 }
 .view-top button { pointer-events: auto; }
 .view-actions { display: flex; gap: 5px; }
+.view-actions select { pointer-events: auto; width: auto; background: #202936; font-size: 12px; padding: 4px 5px; }
+.view-feedback { position: absolute; left: 13px; top: 49px; right: 13px; pointer-events: none; }
+#active-angle { display: inline-block; color: #f7cf79; background: #151d27ef; padding: 4px 7px; border: 1px solid #384555; border-radius: 5px; font: 12px var(--mono); }
+#pointer-hint { margin-left: 5px; padding: 3px 5px; background: #151d27ef; }
+.scene[data-mode="jog"] canvas { cursor: grab; }
+.scene[data-mode="jog"] canvas:active { cursor: grabbing; }
 .view-label { display: flex; align-items: center; gap: 7px; padding: 5px 8px; background: #111820dc; border: 1px solid #263242; border-radius: 6px; font-size: 12px; }
 .live-dot { background: #86b8e3; width: 6px; height: 6px; border-radius: 50%; }
 .view-floor { position: absolute; inset: auto 13px 12px; pointer-events: none; display: grid; gap: 8px; }

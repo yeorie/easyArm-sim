@@ -146,8 +146,69 @@ try {
   assert.match(await read('#status'), /구성/);
   await page.locator('#delete-pose').click();
   assert.equal(await page.locator('#pose-select option').count(), 1);
+
+  const customAngles = await allAngles();
+  await page.locator('#example-tab').click();
+  await page.locator('#load-ur5e').click();
+  await countJoints(6);
+  assert.match(await read('#structure-title'), /UR5e/);
+  assert.deepEqual(await tcp(), ['491.9', '133.3', '487.9']);
+  assert.equal(await page.locator('#add-joint').isDisabled(), true);
+  await page.locator('#zero').click();
+  await page.waitForFunction(() => document.querySelector('#zero-status').textContent.includes('완료'));
+  assert.deepEqual(await allAngles(), [0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(await tcp(), ['817.2', '232.9', '62.8']);
+  const withDummy = await page.locator('canvas').screenshot();
+  await page.locator('#dummy').uncheck();
+  assert.notDeepEqual(await page.locator('canvas').screenshot(), withDummy);
+  assert.deepEqual(await tcp(), ['817.2', '232.9', '62.8']);
+  await page.locator('#dummy').check();
+  await setField('#jog-angle-5', 90);
+  assert.deepEqual(await tcp(), ['817.2', '232.9', '62.8']);
+  assert.notDeepEqual(await page.locator('canvas').screenshot(), withDummy);
+  await page.reload();
+  assert.match(await read('#structure-title'), /UR5e/);
+  assert.equal((await allAngles())[5], 90);
+  await page.locator('#example-tab').click();
+  await page.locator('#load-custom').click();
+  await countJoints(4);
+  assert.deepEqual(await allAngles(), customAngles);
+  await page.locator('.joint-choice').first().click();
+  await setField('#edit-min', 5);
+  await page.locator('#zero').click();
+  assert.match(await read('#zero-status'), /한계 밖.*J1/);
   assert.deepEqual(errors, []);
-  console.log('Edge: 로봇 캔버스, 좌표계·점군, 마우스 조그, 6→4→5축, +50 mm, TCP, 저장·새로고침·MoveJ·중단·한계와 삭제 통과');
+
+  const pointerPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await pointerPage.goto(url);
+  const canvas = pointerPage.locator('canvas');
+  await canvas.waitFor();
+  const pointerModes = pointerPage.locator('#pointer-mode');
+  const output = pointerPage.locator('#active-angle');
+  const angle = (i) => pointerPage.locator('#jog-angle-' + i).inputValue();
+  async function drag(x, y, dx, dy) {
+    await pointerPage.mouse.move(x, y);
+    await pointerPage.mouse.down();
+    await pointerPage.mouse.move(x + dx, y + dy, { steps: 8 });
+    await pointerPage.mouse.up();
+  }
+  await pointerModes.selectOption('locked');
+  const fixedView = await canvas.screenshot();
+  await drag(600, 250, 70, 40);
+  assert.deepEqual(await canvas.screenshot(), fixedView);
+  await pointerModes.selectOption('jog');
+  await drag(775, 382, 52, 27);
+  assert.notEqual(await angle(2), '-66');
+  assert.match(await output.innerText(), /^J3 /);
+  assert.equal(await angle(1), '38');
+  const elbow = pointerPage.locator('#jog-angle-2');
+  await elbow.fill('-66');
+  await elbow.press('Tab');
+  await drag(768, 227, 52, 27);
+  assert.notEqual(await angle(2), '-66');
+  assert.equal(await angle(5), '-20');
+  assert.match(await output.innerText(), /^J3 /);
+  console.log('Edge: 정반·작업공간, 구조 편집, 저장·MoveJ, UR5e, 영위치, 공구, 시점 고정, 관절·TCP 드래그 통과');
 } finally {
   await browser.close();
 }

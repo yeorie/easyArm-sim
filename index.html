@@ -15,19 +15,31 @@
     <main class="layout">
       <aside class="panel structure" aria-labelledby="structure-title">
         <div class="panel-heading">
-          <h2 id="structure-title">팔 구조</h2>
+          <h2 id="structure-title">팔 모델</h2>
           <button type="button" id="add-joint" class="secondary">+ 관절</button>
         </div>
         <div class="panel-scroll">
-          <div id="joint-list" class="joint-list" aria-label="관절 선택"></div>
-          <div id="joint-editor"></div>
-          <section class="tool-section">
+          <div class="model-tabs" role="tablist" aria-label="팔 모델 메뉴">
+            <button type="button" role="tab" id="structure-tab" aria-selected="true" aria-controls="structure-panel">팔 구조</button>
+            <button type="button" role="tab" id="example-tab" aria-selected="false" aria-controls="example-panel" tabindex="-1">예제 불러오기</button>
+          </div>
+          <div id="structure-panel" role="tabpanel" aria-labelledby="structure-tab">
+            <div id="joint-list" class="joint-list" aria-label="관절 선택"></div>
+            <div id="joint-editor"></div>
+            <section class="tool-section">
             <h3>공구 끝점 <span>TCP</span></h3>
             <label class="field">공구 길이 · 로컬 +Z
               <span class="input-unit"><input type="number" id="tool-length" min="0" max="10000" step="any" /><span>mm</span></span>
             </label>
             <p class="hint">마지막 링크 끝에서 적용합니다.</p>
-          </section>
+            <label class="display-switch"><input type="checkbox" id="dummy" /> C자 더미 공구</label>
+            </section>
+          </div>
+          <div id="example-panel" role="tabpanel" aria-labelledby="example-tab" hidden>
+            <button type="button" id="load-custom" class="preset-item"><strong>기본 / 내 로봇팔</strong><span>길이와 관절을 편집하는 범용 모델</span></button>
+            <button type="button" id="load-ur5e" class="preset-item"><strong>Universal Robots UR5e</strong><span>공식 공칭 기구학 · 6축</span></button>
+            <p class="hint preset-license"><a href="./licenses/ur-description-BSD-3-Clause.txt">UR5e 데이터 라이선스</a></p>
+          </div>
         </div>
       </aside>
       <section class="viewport" aria-label="3D 로봇팔 뷰">
@@ -35,9 +47,19 @@
         <div class="view-top">
           <div class="view-label"><span class="live-dot"></span>3D 뷰 <span class="muted">Z-up</span></div>
           <div class="view-actions">
+            <label class="sr-only" for="pointer-mode">마우스 모드</label>
+            <select id="pointer-mode">
+              <option value="orbit">시점 조작</option>
+              <option value="locked">시점 고정</option>
+              <option value="jog">드래그 조그</option>
+            </select>
             <button type="button" id="top-view" class="secondary">위에서</button>
             <button type="button" id="fit" class="secondary">전체 보기</button>
           </div>
+        </div>
+        <div class="view-feedback">
+          <output id="active-angle"></output>
+          <span id="pointer-hint" class="hint" hidden>관절을 직접 끌거나, TCP를 끌어 선택 축을 조그합니다.</span>
         </div>
         <div class="view-floor">
           <div class="view-strip">
@@ -49,7 +71,7 @@
                 <span><b class="z">Z</b> <output id="tcp-z">0.0</output></span>
               </div>
             </div>
-            <div class="mouse-guide">드래그 회전 · 휠 확대 · 우클릭 드래그 이동</div>
+            <div class="mouse-guide" id="mouse-guide">드래그 회전 · 휠 확대 · 우클릭 드래그 이동</div>
           </div>
           <div class="workspace">
             <div class="workspace-heading"><h2>작업공간 · 정반 25 mm 격자</h2><span class="muted">반경 상한 <output id="bound"></output></span></div>
@@ -77,6 +99,11 @@
       <aside class="panel control" aria-labelledby="jog-title">
         <div class="panel-heading"><h2 id="jog-title">관절 조작</h2><span class="muted">각도 · °</span></div>
         <div class="panel-scroll">
+          <div class="zero-actions">
+            <button type="button" id="zero" class="secondary">영위치 이동 · 0°</button>
+            <label class="display-switch"><input type="checkbox" id="marks" /> 기준선</label>
+          </div>
+          <p class="hint status" id="zero-status" role="status"></p>
           <div id="jog"></div>
           <section class="poses">
             <h3>저장 자세</h3>

@@ -77,7 +77,10 @@ function tableGrid() {
   return grid;
 }
 
-export function createScene(host: HTMLElement, selectTarget: (x: number, y: number) => void) {
+export type PointerMode = 'orbit' | 'locked' | 'jog';
+
+export function createScene(host: HTMLElement, selectTarget: (x: number, y: number) => void,
+  startJog: (index: number) => void, jogBy: (index: number, degrees: number) => void) {
   const renderer = new T.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setClearColor(0x0c1016);
@@ -186,7 +189,28 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   scene.add(tcp);
 
   const tool = new T.Mesh(cylinder, toolMaterial);
-  scene.add(tool);
+  const riser = new T.Mesh(linkBody, body);
+  const box = new T.BoxGeometry(1, 1, 1);
+  const dummy = new T.Group();
+  const dummyPlate = new T.Group();
+  const yellow = new T.MeshBasicMaterial({ color: 0xffc646 });
+  const black = new T.MeshBasicMaterial({ color: 0x101820 });
+  function boxPart(width: number, height: number, thickness: number, x: number, y: number, z: number,
+    surface: T.Material) {
+    const result = new T.Mesh(box, surface);
+    result.scale.set(width, height, thickness);
+    result.position.set(x, y, z);
+    return result;
+  }
+  dummyPlate.add(
+    boxPart(13, 66, 10, -39, 0, 0, yellow),
+    boxPart(70, 12, 10, 0, -27, 0, yellow),
+    boxPart(70, 12, 10, 0, 27, 0, yellow),
+    boxPart(17, 11, 11, 27, 27, 0, black),
+  );
+  dummyPlate.rotation.x = -Math.PI / 6;
+  dummy.add(dummyPlate);
+  scene.add(tool, dummy, riser);
   const highlight = new T.Mesh(cylinder, axisMaterials.Z);
   const highlightHead = new T.Mesh(new T.ConeGeometry(9, 22, 20), axisMaterials.Z);
   highlight.renderOrder = highlightHead.renderOrder = 3;
@@ -200,7 +224,26 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   scene.add(chain);
   const visuals: {
     body: T.Mesh; cap: T.Mesh; collar: T.Mesh; insert: T.Mesh; link: T.Mesh; neck: T.Mesh; frame: T.Group;
+    fixedMark: T.Group; movingMark: T.Group;
   }[] = [];
+  const axisAlign = Object.fromEntries(axes.map(axis =>
+    [axis, new T.Quaternion().setFromUnitVectors(up, unit[axis])])) as Record<Axis, T.Quaternion>;
+  const markBacking = new T.MeshBasicMaterial({ color: 0xccd5dc });
+
+  function witness(moving: boolean) {
+    const mark = new T.Group();
+    // At 0°, both stripes line up on the back (−Z of the marker's radial frame).
+    for (const side of [-1, 1]) {
+      if (moving) {
+        mark.add(boxPart(.18, .035, .49, 0, side * .677, -.46, yellow));
+        mark.add(boxPart(.12, .38, .05, 0, side * .30, -1, yellow));
+      } else {
+        mark.add(boxPart(.17, .06, .23, 0, side * .524, -.94, markBacking));
+        mark.add(boxPart(.076, .08, .24, 0, side * .531, -.94, black));
+      }
+    }
+    return mark;
+  }
 
   function segment(mesh: T.Mesh, a: T.Vector3, b: T.Vector3, width: number) {
     const vector = b.clone().sub(a);
@@ -212,6 +255,7 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   }
 
   let extent = 1;
+  let centerZ = 0;
   let renderPending = false;
   function draw() {
     if (renderPending) return;
@@ -227,7 +271,7 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     const vertical = T.MathUtils.degToRad(camera.fov / 2);
     const halfAngle = Math.min(vertical, Math.atan(Math.tan(vertical) * camera.aspect));
     const distance = Math.max(210, extent * (top ? 1.1 : 1.28) / Math.sin(halfAngle));
-    controls.target.set(0, 0, extent * 0.035);
+    controls.target.set(0, 0, centerZ + extent * 0.035);
     const direction = top ? new T.Vector3(0, -0.0001, 1) : new T.Vector3(0.78, -1, 0.67);
     camera.position.copy(controls.target).addScaledVector(direction.normalize(), distance);
     controls.update();
@@ -253,6 +297,8 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
         link: new T.Mesh(linkBody, body),
         neck: new T.Mesh(cylinder, gray),
         frame: axisFrame(71),
+        fixedMark: witness(false),
+        movingMark: witness(true),
       };
       visuals.push(visual);
       chain.add(...Object.values(visual));
@@ -265,7 +311,10 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
       });
     }
     extent = Math.max(85, radius(model));
+    shell.position.set(...(model.origin ?? [0, 0, 0]));
+    centerZ = shell.position.z;
     shell.scale.setScalar(radius(model));
+    segment(riser, base.position, shell.position, 48);
     draw();
   }
 
@@ -288,22 +337,35 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   }
 
   function update(model: Robot, solved: ReturnType<typeof solve>, selected: number, display: {
-    sphere: boolean; points: boolean; frames: boolean; slice: boolean;
+    sphere: boolean; points: boolean; frames: boolean; slice: boolean; dummy: boolean; marks: boolean;
   }) {
+    selectedJoint = selected;
     for (const [i, frame] of solved.frames.entries()) {
       const visual = visuals[i];
       const joint = model.joints[i];
       const width = [52, 44, 38, 29, 23, 17][i] ?? 17;
       const spindle = unit[joint.axis].clone().applyQuaternion(frame.orientation);
+      const origin = frame.origin.clone();
+      if (i === 0 && model.origin) origin.addScaledVector(spindle, -34);
+      for (const mark of [visual.fixedMark, visual.movingMark]) {
+        mark.position.copy(origin);
+        mark.scale.setScalar(width);
+        mark.visible = display.marks;
+      }
+      visual.fixedMark.quaternion.copy(frame.zero).multiply(axisAlign[joint.axis]);
+      visual.movingMark.quaternion.copy(frame.orientation).multiply(axisAlign[joint.axis]);
       visual.body.material = i === selected ? active : gray;
-      segment(visual.body, frame.origin.clone().addScaledVector(spindle, -width * 0.48),
-        frame.origin.clone().addScaledVector(spindle, width * 0.48), width);
-      segment(visual.cap, frame.origin.clone().addScaledVector(spindle, -width * 0.58),
-        frame.origin.clone().addScaledVector(spindle, width * 0.58), width * 0.84);
-      segment(visual.collar, frame.origin.clone().addScaledVector(spindle, -width * 0.66),
-        frame.origin.clone().addScaledVector(spindle, width * 0.66), width * 0.70);
-      segment(visual.insert, frame.origin.clone().addScaledVector(spindle, -width * 0.71),
-        frame.origin.clone().addScaledVector(spindle, width * 0.71), width * 0.26);
+      segment(visual.body, origin.clone().addScaledVector(spindle, -width * 0.48),
+        origin.clone().addScaledVector(spindle, width * 0.48), width);
+      segment(visual.cap, origin.clone().addScaledVector(spindle, -width * 0.58),
+        origin.clone().addScaledVector(spindle, width * 0.58), width * 0.84);
+      segment(visual.collar, origin.clone().addScaledVector(spindle, -width * 0.66),
+        origin.clone().addScaledVector(spindle, width * 0.66), width * 0.70);
+      segment(visual.insert, origin.clone().addScaledVector(spindle, -width * 0.71),
+        origin.clone().addScaledVector(spindle, width * 0.71), width * 0.26);
+      visual.body.userData.joint = i;
+      visual.body.userData.spindle = spindle;
+      visual.body.userData.origin = frame.origin;
       const linkLength = frame.origin.distanceTo(frame.end);
       const trimFraction = Math.min(0.30, width / Math.max(linkLength, 1) * 0.75);
       segment(visual.neck, frame.origin, frame.end, width * 0.36);
@@ -327,6 +389,9 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     }
     segment(tool, solved.frames[solved.frames.length - 1].end, solved.tcp, 12);
     tcp.position.copy(solved.tcp);
+    dummy.position.copy(solved.tcp);
+    dummy.quaternion.copy(solved.toolOrientation);
+    dummy.visible = display.dummy;
     shell.visible = display.sphere && radius(model) > 0;
     points.visible = display.points;
     slice.visible = display.slice;
@@ -336,19 +401,64 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   controls.addEventListener('change', draw);
   const picker = new T.Raycaster();
   const plate = new T.Plane(unit.Z, -floorZ);
-  renderer.domElement.addEventListener('dblclick', event => {
+  let mode: PointerMode = 'orbit';
+  let selectedJoint = 0;
+  let gesture: { id: number; index: number; x: number; y: number; direction: T.Vector2 } | undefined;
+  function setMode(value: PointerMode) {
+    gesture = undefined;
+    mode = value;
+    host.dataset.mode = value;
+    controls.enabled = mode === 'orbit';
+  }
+
+  function pointRay(event: MouseEvent) {
     const rect = renderer.domElement.getBoundingClientRect();
     const cursor = new T.Vector2((event.clientX - rect.left) / rect.width * 2 - 1,
       1 - (event.clientY - rect.top) / rect.height * 2);
     camera.updateMatrixWorld();
     picker.setFromCamera(cursor, camera);
+    scene.updateMatrixWorld();
+    return rect;
+  }
+  renderer.domElement.addEventListener('dblclick', event => {
+    if (mode === 'jog') return;
+    pointRay(event);
     const hit = picker.ray.intersectPlane(plate, new T.Vector3());
     if (hit && Math.abs(hit.x) <= gridExtent && Math.abs(hit.y) <= gridExtent) {
       selectTarget(snapToGrid(hit.x), snapToGrid(hit.y));
     }
   });
+
+  renderer.domElement.addEventListener('pointerdown', event => {
+    if (mode !== 'jog' || event.button !== 0 || gesture) return;
+    const rect = pointRay(event);
+    const joints = visuals.flatMap(visual => [visual.body, visual.cap, visual.collar, visual.insert]);
+    const handles = dummy.visible ? [...dummyPlate.children, tool, marker] : [tool, marker];
+    const found = picker.intersectObjects([...joints, ...handles], false).find(hit => hit.object.visible);
+    if (!found) return;
+    const joint = joints.indexOf(found.object as T.Mesh);
+    const index = joint < 0 ? selectedJoint : Math.floor(joint / 4);
+    const { spindle, origin } = visuals[index].body.userData as { spindle: T.Vector3; origin: T.Vector3 };
+    const tangent = spindle.clone().cross(found.point.clone().sub(origin)).normalize();
+    const current = found.point.clone().project(camera);
+    const next = found.point.clone().addScaledVector(tangent, 100).project(camera);
+    const direction = new T.Vector2((next.x - current.x) * rect.width, (current.y - next.y) * rect.height);
+    if (direction.length() < 5) direction.set(1, 0);
+    else direction.normalize();
+    gesture = { id: event.pointerId, index, x: event.clientX, y: event.clientY, direction };
+    renderer.domElement.setPointerCapture(event.pointerId);
+    startJog(index);
+  });
+  renderer.domElement.addEventListener('pointermove', event => {
+    if (event.pointerId !== gesture?.id) return;
+    const movement = (event.clientX - gesture.x) * gesture.direction.x + (event.clientY - gesture.y) * gesture.direction.y;
+    gesture.x = event.clientX;
+    gesture.y = event.clientY;
+    jogBy(gesture.index, movement * 0.65);
+  });
+  renderer.domElement.addEventListener('lostpointercapture', () => { gesture = undefined; });
   new ResizeObserver(resize).observe(host);
   resize();
 
-  return { rebuild, update, fit, setSamples, setTarget };
+  return { rebuild, update, fit, setSamples, setTarget, setMode };
 }
