@@ -26,11 +26,12 @@ npm run preview
 ## 관절 조작과 예제
 
 - 검정 기준선은 부모 쪽 0° 위치, 노랑 표시는 회전축과 함께 도는 위치입니다. 각도가 0°일 때 두 표시가 같은 방향을 가리킵니다. 영위치 이동은 모든 축을 MoveJ 보간으로 0°로 보내며, 허용 한계에 0°가 없는 축이 있으면 시작 전에 표시합니다.
-- C자 공구는 현재 TCP에 부착하는 방향 확인용 형상입니다. 좌표와 작업공간 계산에는 공구 길이 입력이 적용됩니다.
+- C자 공구는 닫힌 쪽을 플랜지 쪽에 장착하고, 열린 쪽이 공구의 로컬 +Z 방향으로 향하는 표시용 형상입니다. 좌표와 작업공간 계산에는 공구 길이 입력이 적용됩니다.
 - 마우스 모드에서 **시점 고정**은 마우스로 하는 시점 조작을 막습니다. **드래그 조그**에서는 관절을 끌어 해당 축을 돌리거나 TCP·공구를 끌어 선택 축을 돌립니다. 드래그 결과는 각도 입력과 TCP에 바로 반영됩니다.
-- **예제 불러오기 → Universal Robots UR5e**는 ROS `base_link` 기준의 공칭 관절 원점, 회전축, 한계와 `tool0` 변환을 적용합니다. 앱 자체의 단순 형상으로 표시합니다. UR5e와 사용자 팔을 전환해도 각 모델의 현재 자세와 공구 길이가 보존됩니다.
+- **예제 불러오기 → Universal Robots UR5e**는 ROS `base_link` 기준의 공칭 관절 원점, 회전축, 한계와 `tool0` 변환을 적용합니다. 공식 외형 메시 7개를 RViz와 같은 시각 변환으로 배치합니다. UR5e와 사용자 팔을 전환해도 각 모델의 현재 자세와 공구 길이가 보존됩니다.
+- 범용 팔에서는 측면 오프셋 구간을 먼저 그린 다음 선택한 길이 방향으로 꺾습니다. 관절 원점, 링크 끝점과 TCP가 동일한 기구학을 따릅니다.
 
-UR5e 출처는 [Universal Robots ROS 2 Description의 고정 커밋](https://github.com/UniversalRobots/Universal_Robots_ROS2_Description/tree/0eb1a861f7772fceb38510d90fa2f98ec668070c)입니다. `config/ur5e/default_kinematics.yaml`, `config/ur5e/joint_limits.yaml`, `urdf/ur_macro.xacro`를 사용했습니다. [원본 BSD-3-Clause 라이선스](public/licenses/ur-description-BSD-3-Clause.txt)를 배포에 포함합니다.
+UR5e 출처는 [Universal Robots ROS 2 Description의 고정 커밋](https://github.com/UniversalRobots/Universal_Robots_ROS2_Description/tree/0eb1a861f7772fceb38510d90fa2f98ec668070c)입니다. `config/ur5e/default_kinematics.yaml`, `config/ur5e/joint_limits.yaml`, `urdf/ur_macro.xacro`, `config/ur5e/visual_parameters.yaml` 및 `meshes/ur5e/visual/`의 원본 메시를 사용했습니다. [원본 BSD-3-Clause 라이선스](public/licenses/ur-description-BSD-3-Clause.txt)를 배포에 포함합니다.
 
 ## 작업공간과 자세
 

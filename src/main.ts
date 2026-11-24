@@ -150,7 +150,7 @@ function updateStructure(topologyChanged = false) {
   else state.model.joints.forEach((joint, i) => { list.children[i].children[2].textContent = joint.length + ' mm'; });
   renderPoses();
   workspaceSamples = sample(state.model);
-  scene?.rebuild(state.model);
+  scene?.rebuild(state.model, state.preset === 'ur5e');
   scene?.setSamples(workspaceSamples);
   refreshTarget();
   updatePose();

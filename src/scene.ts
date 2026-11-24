@@ -1,6 +1,7 @@
 import * as T from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { axes, radius, unit, type Axis, type Robot, type solve } from './kinematics.ts';
+import { axes, offsetAxis, radius, unit, type Axis, type Robot, type solve } from './kinematics.ts';
+import { loadUr5eVisual, ur5eVisual } from './ur5e-visual.ts';
 import { floorZ, gridExtent, gridSpacing, snapToGrid } from './workspace.ts';
 
 const colors = { X: 0xf47778, Y: 0x62cf9b, Z: 0x78aaff };
@@ -203,14 +204,14 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     return result;
   }
   dummyPlate.add(
-    boxPart(13, 66, 10, -39, 0, 0, yellow),
-    boxPart(70, 12, 10, 0, -27, 0, yellow),
-    boxPart(70, 12, 10, 0, 27, 0, yellow),
-    boxPart(17, 11, 11, 27, 27, 0, black),
+    boxPart(66, 11, 10, 0, 0, 5, yellow),
+    boxPart(11, 11, 50, -27, 0, 30, yellow),
+    boxPart(11, 11, 50, 27, 0, 30, yellow),
+    boxPart(12, 12, 11, 27, 0, 49, black),
   );
-  dummyPlate.rotation.x = -Math.PI / 6;
   dummy.add(dummyPlate);
-  scene.add(tool, dummy, riser);
+  const mountingBlock = boxPart(158, 158, -floorZ, 0, 0, floorZ / 2, trim);
+  scene.add(tool, dummy, riser, mountingBlock);
   const highlight = new T.Mesh(cylinder, axisMaterials.Z);
   const highlightHead = new T.Mesh(new T.ConeGeometry(9, 22, 20), axisMaterials.Z);
   highlight.renderOrder = highlightHead.renderOrder = 3;
@@ -221,10 +222,30 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   scene.add(selectedTag);
   const jointLabels = new Map<string, T.SpriteMaterial>();
   const chain = new T.Group();
-  scene.add(chain);
+  const official = new T.Group();
+  const officialParts = ur5eVisual.map(() => new T.Group());
+  official.add(...officialParts);
+  scene.add(chain, official);
+  let wantsOfficial = false;
+  let officialLoad: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
+  function showAppearance() {
+    const ready = wantsOfficial && officialLoad === 'ready';
+    official.visible = ready;
+    platform.visible = !ready;
+    mountingBlock.visible = ready;
+    for (const visual of visuals) visual.shell.visible = !ready;
+    riser.visible = wantsOfficial && !ready;
+    host.dataset.appearance = ready ? 'ur5e' : wantsOfficial ? officialLoad : 'custom';
+    const notice = host.parentElement?.querySelector<HTMLElement>('#appearance-status');
+    if (notice) {
+      notice.hidden = !wantsOfficial || ready;
+      notice.textContent = officialLoad === 'failed' ? '공식 외형을 열지 못했습니다. 단순 외형을 표시합니다.' : 'UR5e 외형 로딩 중';
+    }
+    draw();
+  }
   const visuals: {
     body: T.Mesh; cap: T.Mesh; collar: T.Mesh; insert: T.Mesh; link: T.Mesh; neck: T.Mesh; frame: T.Group;
-    fixedMark: T.Group; movingMark: T.Group;
+    fixedMark: T.Group; movingMark: T.Group; elbow: T.Mesh; bend: T.Mesh; shell: T.Group;
   }[] = [];
   const axisAlign = Object.fromEntries(axes.map(axis =>
     [axis, new T.Quaternion().setFromUnitVectors(up, unit[axis])])) as Record<Axis, T.Quaternion>;
@@ -287,7 +308,7 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     draw();
   }
 
-  function rebuild(model: Robot) {
+  function rebuild(model: Robot, useOfficial: boolean) {
     while (visuals.length < model.joints.length) {
       const visual = {
         body: new T.Mesh(cylinder, gray),
@@ -299,13 +320,19 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
         frame: axisFrame(71),
         fixedMark: witness(false),
         movingMark: witness(true),
+        elbow: new T.Mesh(cylinder, trim),
+        bend: new T.Mesh(new T.SphereGeometry(1, 16, 12), body),
+        shell: new T.Group(),
       };
+      visual.shell.add(visual.body, visual.cap, visual.collar, visual.insert,
+        visual.link, visual.neck, visual.elbow, visual.bend);
       visuals.push(visual);
-      chain.add(...Object.values(visual));
+      chain.add(visual.shell, visual.frame, visual.fixedMark, visual.movingMark);
     }
     while (visuals.length > model.joints.length) {
       const removed = visuals.pop()!;
-      chain.remove(...Object.values(removed));
+      chain.remove(removed.shell, removed.frame, removed.fixedMark, removed.movingMark);
+      removed.bend.geometry.dispose();
       removed.frame.traverse(object => {
         if (object instanceof T.ArrowHelper) object.dispose();
       });
@@ -315,7 +342,22 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     centerZ = shell.position.z;
     shell.scale.setScalar(radius(model));
     segment(riser, base.position, shell.position, 48);
-    draw();
+    wantsOfficial = useOfficial;
+    if (wantsOfficial && officialLoad !== 'loading' && officialLoad !== 'ready') {
+      officialLoad = 'loading';
+      loadUr5eVisual().then(parts => {
+        for (const [i, part] of parts.entries()) {
+          part.traverse(object => { if (object instanceof T.Mesh) object.userData.joint = Math.max(0, i - 1); });
+          officialParts[i].add(part);
+        }
+        officialLoad = 'ready';
+        showAppearance();
+      }).catch(() => {
+        officialLoad = 'failed';
+        showAppearance();
+      });
+    }
+    showAppearance();
   }
 
   function setSamples(samples: Float64Array) {
@@ -345,6 +387,8 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
       const joint = model.joints[i];
       const width = [52, 44, 38, 29, 23, 17][i] ?? 17;
       const spindle = unit[joint.axis].clone().applyQuaternion(frame.orientation);
+      officialParts[i + 1]?.position.copy(frame.origin);
+      officialParts[i + 1]?.quaternion.copy(frame.orientation);
       const origin = frame.origin.clone();
       if (i === 0 && model.origin) origin.addScaledVector(spindle, -34);
       for (const mark of [visual.fixedMark, visual.movingMark]) {
@@ -363,14 +407,22 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
         origin.clone().addScaledVector(spindle, width * 0.66), width * 0.70);
       segment(visual.insert, origin.clone().addScaledVector(spindle, -width * 0.71),
         origin.clone().addScaledVector(spindle, width * 0.71), width * 0.26);
-      visual.body.userData.joint = i;
+      for (const handle of [visual.body, visual.cap, visual.collar, visual.insert]) handle.userData.joint = i;
       visual.body.userData.spindle = spindle;
       visual.body.userData.origin = frame.origin;
-      const linkLength = frame.origin.distanceTo(frame.end);
+      const corner = frame.origin.clone();
+      if (joint.offset && !joint.vector) {
+        corner.addScaledVector(unit[offsetAxis(joint.direction)].clone().applyQuaternion(frame.orientation), joint.offset);
+      }
+      const linkLength = corner.distanceTo(frame.end);
       const trimFraction = Math.min(0.30, width / Math.max(linkLength, 1) * 0.75);
-      segment(visual.neck, frame.origin, frame.end, width * 0.36);
-      segment(visual.link, frame.origin.clone().lerp(frame.end, trimFraction),
-        frame.end.clone().lerp(frame.origin, trimFraction), width * 0.66);
+      segment(visual.elbow, frame.origin, corner, width * 0.59);
+      visual.bend.visible = visual.elbow.visible && linkLength > 0.001;
+      visual.bend.position.copy(corner);
+      visual.bend.scale.setScalar(width * 0.64);
+      segment(visual.neck, corner, frame.end, width * 0.36);
+      segment(visual.link, corner.clone().lerp(frame.end, visual.bend.visible ? 0 : trimFraction),
+        frame.end.clone().lerp(corner, trimFraction), width * 0.66);
       visual.frame.position.copy(frame.origin);
       visual.frame.quaternion.copy(frame.orientation);
       visual.frame.visible = display.frames;
@@ -387,9 +439,12 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
         selectedTag.position.copy(frame.origin).addScaledVector(spindle, width + 83);
       }
     }
-    segment(tool, solved.frames[solved.frames.length - 1].end, solved.tcp, 12);
+    const flange = solved.frames[solved.frames.length - 1].end;
+    const mount = flange.clone().addScaledVector(unit.Z.clone().applyQuaternion(solved.toolOrientation),
+      Math.max(0, model.tool - 55));
+    segment(tool, flange, display.dummy ? mount : solved.tcp, 12);
     tcp.position.copy(solved.tcp);
-    dummy.position.copy(solved.tcp);
+    dummy.position.copy(mount);
     dummy.quaternion.copy(solved.toolOrientation);
     dummy.visible = display.dummy;
     shell.visible = display.sphere && radius(model) > 0;
@@ -432,12 +487,11 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   renderer.domElement.addEventListener('pointerdown', event => {
     if (mode !== 'jog' || event.button !== 0 || gesture) return;
     const rect = pointRay(event);
-    const joints = visuals.flatMap(visual => [visual.body, visual.cap, visual.collar, visual.insert]);
+    const joints = official.visible ? officialParts : visuals.flatMap(visual => [visual.body, visual.cap, visual.collar, visual.insert]);
     const handles = dummy.visible ? [...dummyPlate.children, tool, marker] : [tool, marker];
-    const found = picker.intersectObjects([...joints, ...handles], false).find(hit => hit.object.visible);
+    const found = picker.intersectObjects([...joints, ...handles], official.visible).find(hit => hit.object.visible);
     if (!found) return;
-    const joint = joints.indexOf(found.object as T.Mesh);
-    const index = joint < 0 ? selectedJoint : Math.floor(joint / 4);
+    const index = found.object.userData.joint ?? selectedJoint;
     const { spindle, origin } = visuals[index].body.userData as { spindle: T.Vector3; origin: T.Vector3 };
     const tangent = spindle.clone().cross(found.point.clone().sub(origin)).normalize();
     const current = found.point.clone().project(camera);
