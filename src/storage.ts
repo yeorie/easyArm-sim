@@ -7,7 +7,7 @@ export const storageKey = 'easyArm-sim:v1';
 export const maxJoints = 24;
 export const maxLength = 10000;
 export const maxAngle = 3600;
-export type Preset = 'custom' | 'ur5e';
+export type Preset = 'custom' | 'ur5e' | 'factory';
 type CustomArm = { model: Robot; angles: number[] };
 
 export interface State {
@@ -70,12 +70,12 @@ function restoreUr5e(state: State, angles: number[] | undefined, tool: number | 
 
 export function switchPreset(state: State, preset: Preset) {
   if (preset === state.preset) return;
+  if (state.preset === 'custom') state.custom = { model: state.model, angles: state.angles };
+  if (state.preset === 'ur5e') state.ur5e = { angles: state.angles, tool: state.model.tool };
   if (preset === 'ur5e') {
-    state.custom = { model: state.model, angles: state.angles };
     restoreUr5e(state, state.ur5e?.angles, state.ur5e?.tool);
   } else {
-    state.ur5e = { angles: state.angles, tool: state.model.tool };
-    const arm = state.custom ?? defaults();
+    const arm = preset === 'factory' ? defaults() : state.custom ?? defaults();
     state.model = arm.model;
     state.angles = arm.angles;
   }
@@ -95,6 +95,12 @@ export function readState(): State {
       fallback.preset = 'ur5e';
       restoreUr5e(fallback, angles, model?.tool);
       if (value.custom) fallback.custom = customArm(value.custom.model, value.custom.angles);
+    } else if (value.preset === 'factory') {
+      fallback.preset = 'factory';
+      fallback.angles = example.joints.map((joint, i) => clampAngle(
+        Number.isFinite(angles?.[i]) ? angles[i] : initialAngles[i], joint));
+      if (value.custom) fallback.custom = customArm(value.custom.model, value.custom.angles);
+      if (value.ur5e) fallback.ur5e = value.ur5e;
     } else {
       const arm = customArm(model, angles);
       if (arm) Object.assign(fallback, arm);

@@ -45,7 +45,8 @@
             </section>
           </div>
           <div id="example-panel" role="tabpanel" aria-labelledby="example-tab" hidden>
-            <button type="button" id="load-custom" class="preset-item"><strong>기본 / 내 로봇팔</strong><span>길이와 관절을 편집하는 범용 모델</span></button>
+            <button type="button" id="load-custom" class="preset-item"><strong>내 로봇팔</strong><span>편집하던 구조와 자세</span></button>
+            <button type="button" id="load-factory" class="preset-item"><strong>기본 6축 팔 · 원본</strong><span>관절을 추가하거나 삭제하기 전의 기본 모델</span></button>
             <button type="button" id="load-ur5e" class="preset-item"><strong>Universal Robots UR5e</strong><span>공식 공칭 기구학 · 6축</span></button>
             <p class="hint preset-license"><a href="./licenses/ur-description-BSD-3-Clause.txt">UR5e 데이터 라이선스</a></p>
           </div>
@@ -110,11 +111,12 @@
         <div class="panel-heading"><h2 id="jog-title">관절 조작</h2><span class="muted">각도 · °</span></div>
         <div class="panel-scroll">
           <div class="zero-actions">
-            <button type="button" id="zero" class="secondary" title="모든 관절을 0°로 이동">관절 0°</button>
-            <button type="button" id="upright" class="secondary" hidden>수직 기준 자세</button>
+            <button type="button" id="zero" class="secondary">영자세 이동</button>
             <label class="display-switch"><input type="checkbox" id="marks" /> 기준선</label>
           </div>
+          <p id="angle-reference" class="hint" hidden>UR 관절값 표시 · 앱 영자세는 J2 −90°, J5 90°</p>
           <p class="hint status" id="zero-status" role="status"></p>
+          <p class="hint error status" id="table-status" role="status"></p>
           <details class="pose-check">
             <summary>
               <span>자세 진단</span>

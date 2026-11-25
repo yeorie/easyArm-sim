@@ -73,7 +73,7 @@ export function radius(model: Robot) {
     sum + Math.hypot(...(joint.vector ?? [joint.length, joint.offset])), model.tool);
 }
 
-export function sample(model: Robot, count = 4096) {
+export function sample(model: Robot, count = 4096, accept?: (solved: ReturnType<typeof solve>) => boolean) {
   // Keep the random sequence independent of link lengths and joint limits.
   let seed = 0x731af9d;
   function random() {
@@ -84,14 +84,18 @@ export function sample(model: Robot, count = 4096) {
   }
 
   const data = new Float64Array(count * 3);
+  let cursor = 0;
   const angles = model.joints.map(() => 0);
   for (let index = 0; index < count; index++) {
     for (const [axis, joint] of model.joints.entries()) {
       angles[axis] = joint.min + random() * (joint.max - joint.min);
     }
-    transforms(model, angles, false).tcp.toArray(data, index * 3);
+    const solved = transforms(model, angles, Boolean(accept));
+    if (accept && !accept(solved)) continue;
+    solved.tcp.toArray(data, cursor);
+    cursor += 3;
   }
-  return data;
+  return cursor === data.length ? data : data.slice(0, cursor);
 }
 
 export function poseProblem(model: Robot, pose: Pose) {

@@ -228,6 +228,38 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   scene.add(chain, official);
   let wantsOfficial = false;
   let officialLoad: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
+  const alertMaterials = new Map<T.MeshStandardMaterial | T.MeshPhongMaterial | T.MeshLambertMaterial, { color: T.Color; intensity: number }>();
+  const alertColor = new T.Color(0xff1608);
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  let alertLevel = false;
+  let alarmTimer: number | undefined;
+  function applyAlarm() {
+    const isBright = alertLevel && (reducedMotion.matches || Math.floor(performance.now() / 450) % 2 === 0);
+    host.dataset.alarm = alertLevel ? isBright ? 'bright' : 'dim' : 'off';
+    for (const [surface, original] of alertMaterials) {
+      surface.emissive.copy(isBright ? alertColor : original.color);
+      surface.emissiveIntensity = isBright ? 1.15 : original.intensity;
+    }
+    draw();
+  }
+  function registerAlarmMaterial(surface: T.Material) {
+    if ((surface instanceof T.MeshStandardMaterial || surface instanceof T.MeshPhongMaterial ||
+         surface instanceof T.MeshLambertMaterial) &&
+        !alertMaterials.has(surface)) {
+      alertMaterials.set(surface, { color: surface.emissive.clone(), intensity: surface.emissiveIntensity });
+    }
+  }
+  for (const surface of [body, gray, trim, active, toolMaterial]) registerAlarmMaterial(surface);
+  function setSingularityAlert(active: boolean) {
+    if (alertLevel === active) return;
+    alertLevel = active;
+    if (alarmTimer !== undefined) {
+      clearInterval(alarmTimer);
+      alarmTimer = undefined;
+    }
+    applyAlarm();
+    if (active && !reducedMotion.matches) alarmTimer = window.setInterval(applyAlarm, 100);
+  }
   function showAppearance() {
     const ready = wantsOfficial && officialLoad === 'ready';
     official.visible = ready;
@@ -347,10 +379,17 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
       officialLoad = 'loading';
       loadUr5eVisual().then(parts => {
         for (const [i, part] of parts.entries()) {
-          part.traverse(object => { if (object instanceof T.Mesh) object.userData.joint = Math.max(0, i - 1); });
+          part.traverse(object => {
+            if (!(object instanceof T.Mesh)) return;
+            object.userData.joint = Math.max(0, i - 1);
+            for (const surface of Array.isArray(object.material) ? object.material : [object.material]) {
+              registerAlarmMaterial(surface);
+            }
+          });
           officialParts[i].add(part);
         }
         officialLoad = 'ready';
+        applyAlarm();
         showAppearance();
       }).catch(() => {
         officialLoad = 'failed';
@@ -514,5 +553,5 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   new ResizeObserver(resize).observe(host);
   resize();
 
-  return { rebuild, update, fit, setSamples, setTarget, setMode };
+  return { rebuild, update, fit, setSamples, setTarget, setMode, setSingularityAlert };
 }

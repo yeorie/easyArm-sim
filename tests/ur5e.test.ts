@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Matrix4, Vector3 } from 'three';
 import { radius, sample, solve, unit, zeroBlockedAxes } from '../src/kinematics.ts';
-import { ur5e } from '../src/ur5e.ts';
+import { ur5e, ur5eInitialAngles, ur5eUprightAngles } from '../src/ur5e.ts';
+import { pathContact, tableContact } from '../src/ur5e-clearance.ts';
 import { readState, switchPreset } from '../src/storage.ts';
 
 test('UR5e base_link 기준 tool0 위치와 방향이 기준 행렬 곱과 일치한다', () => {
@@ -64,6 +65,17 @@ test('영위치가 한계를 벗어난 축만 표시한다', () => {
   model.joints[1].min = 1;
   model.joints[4].max = -1;
   assert.deepEqual(zeroBlockedAxes(model), ['J2', 'J5']);
+});
+
+test('공식 충돌 메시로 아래로 뻗는 자세와 정반을 통과하는 경로를 잡는다', () => {
+  const below = [0, 90, 0, 0, 90, 0];
+  assert.equal(tableContact(solve(ur5e, ur5eUprightAngles)), 0);
+  assert.equal(tableContact(solve(ur5e, below)), 2);
+  assert.ok(pathContact(ur5e, ur5eUprightAngles, below));
+  assert.equal(pathContact(ur5e, ur5eInitialAngles, ur5eUprightAngles), 0);
+  const candidates = 256;
+  const free = sample(ur5e, candidates, pose => !tableContact(pose));
+  assert.ok(free.length / 3 > candidates / 4 && free.length / 3 < candidates);
 });
 
 test('부모 회전은 자식 기준선을 옮기고 조그는 회전 표시선만 돌린다', () => {

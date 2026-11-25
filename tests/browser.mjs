@@ -36,7 +36,6 @@ try {
   assert.equal(await page.locator('#sphere').isChecked(), false);
   assert.equal(await page.locator('#slice').isChecked(), true);
   assert.equal(await page.locator('.scene-error').count(), 0);
-  assert.equal(await page.locator('#upright').isHidden(), true);
   const beforeView = await page.locator('canvas').screenshot();
   if (process.env.EASYARM_SCREENSHOT) await page.screenshot({ path: process.env.EASYARM_SCREENSHOT });
 
@@ -175,15 +174,16 @@ try {
   assert.match(await read('#active-angle'), /^J2 /);
   assert.notEqual((await allAngles())[1], -90);
   await page.locator('#pointer-mode').selectOption('orbit');
-  await page.locator('#upright').click();
+  await page.locator('#zero').click();
   await page.waitForFunction(() => document.querySelector('#zero-status').textContent.includes('완료'));
   assert.deepEqual(await allAngles(), [0, -90, 0, 0, 90, 0]);
   assert.deepEqual(await tcp(), ['99.7', '133.3', '1079.3']);
   assert.equal(await page.locator('.pose-check').getAttribute('data-level'), 'singular');
-  await page.locator('#zero').click();
-  await page.waitForFunction(() => document.querySelector('#zero-status').textContent.includes('완료'));
-  assert.deepEqual(await allAngles(), [0, 0, 0, 0, 0, 0]);
-  assert.deepEqual(await tcp(), ['817.2', '232.9', '62.8']);
+  await page.locator('#scene[data-alarm="bright"]').waitFor();
+  await page.locator('#scene[data-alarm="dim"]').waitFor();
+  await setField('#jog-angle-1', 90);
+  assert.deepEqual(await allAngles(), [0, -90, 0, 0, 90, 0]);
+  assert.match(await read('#table-status'), /정반 간섭/);
   await page.locator('#ur-range-profile').selectOption('polyscope-x');
   assert.equal(await page.locator('#jog-angle-2').getAttribute('max'), '360');
   await setField('#jog-angle-2', 175);
@@ -203,15 +203,22 @@ try {
   const withDummy = await page.locator('canvas').screenshot();
   await page.locator('#dummy').uncheck();
   assert.notDeepEqual(await page.locator('canvas').screenshot(), withDummy);
-  assert.deepEqual(await tcp(), ['817.2', '232.9', '62.8']);
+  assert.deepEqual(await tcp(), ['99.7', '133.3', '1079.3']);
   await page.locator('#dummy').check();
   await setField('#jog-angle-5', 90);
-  assert.deepEqual(await tcp(), ['817.2', '232.9', '62.8']);
+  assert.deepEqual(await tcp(), ['99.7', '133.3', '1079.3']);
   assert.notDeepEqual(await page.locator('canvas').screenshot(), withDummy);
   await page.reload();
   await page.locator('.scene[data-appearance="ur5e"]').waitFor();
   assert.match(await read('#structure-title'), /UR5e/);
   assert.equal((await allAngles())[5], 90);
+  await page.locator('#example-tab').click();
+  await page.locator('#load-factory').click();
+  await countJoints(6);
+  assert.match(await read('#structure-title'), /6축 팔 · 원본/);
+  assert.equal(await page.locator('#add-joint').isDisabled(), true);
+  await page.reload();
+  await countJoints(6);
   await page.locator('#example-tab').click();
   await page.locator('#load-custom').click();
   assert.equal(await page.locator('#scene').getAttribute('data-appearance'), 'custom');
@@ -283,7 +290,7 @@ try {
   assert.equal(await legacy.locator('#jog-angle-2').inputValue(), String(initialAngles[2]));
   assert.equal(await legacy.locator('.pose-check').getAttribute('data-level'), 'normal');
   assert.ok(await legacy.locator('body').evaluate(body => body.scrollWidth <= window.innerWidth));
-  console.log('Edge: UR5e 관절 범위 전환·0°·직립·특이점, 범용 0° TCP, 한계 및 기존 조작 통과');
+  console.log('Edge: UR5e 직립 영자세, 정반 차단, 특이점 점멸, 원본 6축 복구, 범위 및 기존 조작 통과');
 } finally {
   await browser.close();
 }
