@@ -4,7 +4,14 @@
 
 **[브라우저에서 easyArm-sim 실행](https://yeorie.github.io/easyArm-sim/)** · [배포 이력](https://github.com/yeorie/easyArm-sim/actions/workflows/pages.yml)
 
-웹 버전은 설치와 계정 없이 WebGL2를 지원하는 브라우저에서 실행됩니다. 오른쪽 슬라이더로 관절을 돌리거나, 왼쪽 **예제 불러오기**에서 UR5e를 선택할 수 있습니다.
+웹 버전은 설치와 계정 없이 WebGL2를 지원하는 브라우저에서 실행됩니다. 오른쪽 슬라이더로 관절을 돌리거나, 왼쪽 **예제 불러오기**에서 제조사 모델을 선택할 수 있습니다.
+
+| 예제 | 축 | 기구 데이터와 외형 |
+| --- | --- | --- |
+| 기본 6축 팔 · 원본 | 6 | easyArm-sim 예시값 |
+| Universal Robots UR5e | 6 | Universal Robots ROS 2 Description |
+| Franka Research 3 | 7 | Franka 공식 URDF, DAE 메시 |
+| Kinova Gen3 Vision | 7 | Kinova 공식 URDF, STL 메시 |
 
 ## 로컬 실행
 
@@ -47,6 +54,10 @@ npm run preview
 - 범용 팔에서는 측면 오프셋 구간을 먼저 그린 다음 선택한 길이 방향으로 꺾습니다. 관절 원점, 링크 끝점과 TCP가 동일한 기구학을 따릅니다.
 
 UR5e 출처는 [Universal Robots ROS 2 Description의 고정 커밋](https://github.com/UniversalRobots/Universal_Robots_ROS2_Description/tree/0eb1a861f7772fceb38510d90fa2f98ec668070c)입니다. `config/ur5e/default_kinematics.yaml`, `config/ur5e/joint_limits.yaml`, `urdf/ur_macro.xacro`, `config/ur5e/visual_parameters.yaml` 및 `meshes/ur5e/visual/`의 원본 메시를 사용했습니다. [원본 BSD-3-Clause 라이선스](public/licenses/ur-description-BSD-3-Clause.txt)를 배포에 포함합니다.
+
+- **Franka Research 3**는 [libfranka의 공식 FR3 URDF](https://github.com/frankarobotics/libfranka/blob/e88d08f64cbf842b8f53c0b551963684064038d6/test/fr3.urdf)와 [franka_description의 외형](https://github.com/frankarobotics/franka_description/tree/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual)을 조합합니다. 플랜지는 `link8`을 기준으로 합니다. Apache-2.0 [라이선스](public/licenses/franka-Apache-2.0.txt), [franka_description 고지](public/licenses/franka-NOTICE.txt), [libfranka 고지](public/licenses/libfranka-NOTICE.txt)를 포함합니다.
+- **Kinova Gen3 Vision**은 [Kinova ros_kortex의 7축 Vision URDF와 STL](https://github.com/Kinovarobotics/ros_kortex/tree/c3280d8a6a6b5d96590d51538e3f265710a6c77d/kortex_description/arms/gen3/7dof)을 사용합니다. `end_effector_link`의 고정 변환과 [공식 MoveIt Home 자세](https://github.com/Kinovarobotics/ros2_kortex/blob/b2aa46b29ae8fadd5b293c57e3500925c61eb8e8/kortex_moveit_config/kinova_gen3_7dof_robotiq_2f_85_moveit_config/config/gen3.srdf)를 반영합니다. J1·J3·J5·J7은 연속 회전이며 웹 입력 범위는 ±360°입니다. [라이선스](public/licenses/kinova-ros-kortex.txt)
+- 제조사 예제의 메시를 해당 모델을 열 때 로드합니다. 관절 조그, TCP 계산, 자세 저장과 특이점 진단을 동일한 방식으로 사용할 수 있습니다. UR5e 링크의 정반 간섭 검사는 UR5e 예제에 적용됩니다.
 
 ## 작업공간과 자세
 

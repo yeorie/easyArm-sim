@@ -1,7 +1,9 @@
 import * as T from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { axes, offsetAxis, radius, unit, type Axis, type Robot, type solve } from './kinematics.ts';
-import { loadUr5eVisual, ur5eVisual } from './ur5e-visual.ts';
+import { loadUr5eVisual } from './ur5e-visual.ts';
+import { loadVendorVisual } from './vendor-visual.ts';
+import { vendorModels, type VendorPreset } from './vendor-models.ts';
 import { floorZ, gridExtent, gridSpacing, snapToGrid } from './workspace.ts';
 
 const colors = { X: 0xf47778, Y: 0x62cf9b, Z: 0x78aaff };
@@ -79,6 +81,7 @@ function tableGrid() {
 }
 
 export type PointerMode = 'orbit' | 'locked' | 'jog';
+type OfficialPreset = 'ur5e' | VendorPreset;
 
 export function createScene(host: HTMLElement, selectTarget: (x: number, y: number) => void,
   startJog: (index: number) => void, jogBy: (index: number, degrees: number) => void) {
@@ -223,11 +226,9 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   const jointLabels = new Map<string, T.SpriteMaterial>();
   const chain = new T.Group();
   const official = new T.Group();
-  const officialParts = ur5eVisual.map(() => new T.Group());
-  official.add(...officialParts);
   scene.add(chain, official);
-  let wantsOfficial = false;
-  let officialLoad: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
+  const assemblies = new Map<OfficialPreset, { parts: T.Group[]; status: 'loading' | 'ready' | 'failed' }>();
+  let officialPreset: OfficialPreset | undefined;
   const alertMaterials = new Map<T.MeshStandardMaterial | T.MeshPhongMaterial | T.MeshLambertMaterial, { color: T.Color; intensity: number }>();
   const alertColor = new T.Color(0xff1608);
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -261,17 +262,22 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     if (active && !reducedMotion.matches) alarmTimer = window.setInterval(applyAlarm, 100);
   }
   function showAppearance() {
-    const ready = wantsOfficial && officialLoad === 'ready';
+    const assembly = officialPreset ? assemblies.get(officialPreset) : undefined;
+    const ready = assembly?.status === 'ready';
+    official.clear();
+    if (ready) official.add(...assembly.parts);
     official.visible = ready;
     platform.visible = !ready;
     mountingBlock.visible = ready;
     for (const visual of visuals) visual.shell.visible = !ready;
-    riser.visible = wantsOfficial && !ready;
-    host.dataset.appearance = ready ? 'ur5e' : wantsOfficial ? officialLoad : 'custom';
+    riser.visible = Boolean(officialPreset) && !ready;
+    host.dataset.appearance = ready && officialPreset ? officialPreset : assembly?.status ?? 'custom';
     const notice = host.parentElement?.querySelector<HTMLElement>('#appearance-status');
     if (notice) {
-      notice.hidden = !wantsOfficial || ready;
-      notice.textContent = officialLoad === 'failed' ? '공식 외형을 열지 못했습니다. 단순 외형을 표시합니다.' : 'UR5e 외형 로딩 중';
+      notice.hidden = !officialPreset || Boolean(ready);
+      const name = officialPreset === 'ur5e' ? 'UR5e' : officialPreset ? vendorModels[officialPreset].name : '';
+      notice.textContent = assembly?.status === 'failed'
+        ? '공식 외형을 열지 못했습니다. 단순 외형을 표시합니다.' : name + ' 외형 로딩 중';
     }
     draw();
   }
@@ -340,7 +346,7 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     draw();
   }
 
-  function rebuild(model: Robot, useOfficial: boolean) {
+  function rebuild(model: Robot, preset?: OfficialPreset) {
     while (visuals.length < model.joints.length) {
       const visual = {
         body: new T.Mesh(cylinder, gray),
@@ -374,10 +380,15 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     centerZ = shell.position.z;
     shell.scale.setScalar(radius(model));
     segment(riser, base.position, shell.position, 48);
-    wantsOfficial = useOfficial;
-    if (wantsOfficial && officialLoad !== 'loading' && officialLoad !== 'ready') {
-      officialLoad = 'loading';
-      loadUr5eVisual().then(parts => {
+    officialPreset = preset;
+    if (preset && (!assemblies.has(preset) || assemblies.get(preset)?.status === 'failed')) {
+      const assembly = {
+        status: 'loading' as 'loading' | 'ready' | 'failed',
+        parts: Array.from({ length: model.joints.length + 1 }, () => new T.Group()),
+      };
+      assemblies.set(preset, assembly);
+      const load = preset === 'ur5e' ? loadUr5eVisual() : loadVendorVisual(preset);
+      load.then(parts => {
         for (const [i, part] of parts.entries()) {
           part.traverse(object => {
             if (!(object instanceof T.Mesh)) return;
@@ -386,13 +397,13 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
               registerAlarmMaterial(surface);
             }
           });
-          officialParts[i].add(part);
+          assembly.parts[i].add(part);
         }
-        officialLoad = 'ready';
+        assembly.status = 'ready';
         applyAlarm();
         showAppearance();
       }).catch(() => {
-        officialLoad = 'failed';
+        assembly.status = 'failed';
         showAppearance();
       });
     }
@@ -421,13 +432,14 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
     sphere: boolean; points: boolean; frames: boolean; slice: boolean; dummy: boolean; marks: boolean;
   }) {
     selectedJoint = selected;
+    const officialParts = officialPreset ? assemblies.get(officialPreset)?.parts : undefined;
     for (const [i, frame] of solved.frames.entries()) {
       const visual = visuals[i];
       const joint = model.joints[i];
       const width = [52, 44, 38, 29, 23, 17][i] ?? 17;
       const spindle = unit[joint.axis].clone().applyQuaternion(frame.orientation);
-      officialParts[i + 1]?.position.copy(frame.origin);
-      officialParts[i + 1]?.quaternion.copy(frame.orientation);
+      officialParts?.[i + 1]?.position.copy(frame.origin);
+      officialParts?.[i + 1]?.quaternion.copy(frame.orientation);
       const origin = frame.origin.clone();
       if (i === 0 && model.origin) origin.addScaledVector(spindle, -34);
       for (const mark of [visual.fixedMark, visual.movingMark]) {
@@ -526,7 +538,7 @@ export function createScene(host: HTMLElement, selectTarget: (x: number, y: numb
   renderer.domElement.addEventListener('pointerdown', event => {
     if (mode !== 'jog' || event.button !== 0 || gesture) return;
     const rect = pointRay(event);
-    const joints = official.visible ? officialParts : visuals.flatMap(visual => [visual.body, visual.cap, visual.collar, visual.insert]);
+    const joints = official.visible ? official.children : visuals.flatMap(visual => [visual.body, visual.cap, visual.collar, visual.insert]);
     const handles = dummy.visible ? [...dummyPlate.children, tool, marker] : [tool, marker];
     const found = picker.intersectObjects([...joints, ...handles], official.visible).find(hit => hit.object.visible);
     if (!found) return;

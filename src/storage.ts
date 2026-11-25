@@ -2,12 +2,14 @@ import { axes, clampAngle, type Axis, type Pose, type Robot } from './kinematics
 import { example, initialAngles } from './example.ts';
 import { targetLimit, type Target } from './workspace.ts';
 import { makeUr5e, ur5eInitialAngles, type Ur5eRange } from './ur5e.ts';
+import { vendorModels, type VendorPreset } from './vendor-models.ts';
 
 export const storageKey = 'easyArm-sim:v1';
 export const maxJoints = 24;
 export const maxLength = 10000;
 export const maxAngle = 3600;
-export type Preset = 'custom' | 'ur5e' | 'factory';
+export type Preset = 'custom' | 'ur5e' | 'factory' | VendorPreset;
+export const isVendor = (preset: unknown): preset is VendorPreset => preset === 'fr3' || preset === 'gen3';
 type CustomArm = { model: Robot; angles: number[] };
 
 export interface State {
@@ -17,6 +19,7 @@ export interface State {
   preset: Preset;
   custom?: CustomArm;
   ur5e?: { angles: number[]; tool: number };
+  vendors?: Partial<Record<VendorPreset, { angles: number[]; tool: number }>>;
   ur5eRange: Ur5eRange;
   display: { sphere: boolean; points: boolean; frames: boolean; slice: boolean; dummy: boolean; marks: boolean };
   target: Target;
@@ -68,12 +71,25 @@ function restoreUr5e(state: State, angles: number[] | undefined, tool: number | 
     clampAngle(angles && Number.isFinite(angles[i]) ? angles[i] : ur5eInitialAngles[i], joint));
 }
 
+function restoreVendor(state: State, preset: VendorPreset, angles?: number[], tool?: number) {
+  const definition = vendorModels[preset];
+  state.model = structuredClone(definition.model);
+  if (typeof tool === 'number' && inRange(tool, 0, maxLength)) state.model.tool = tool;
+  state.angles = state.model.joints.map((joint, i) =>
+    clampAngle(angles && Number.isFinite(angles[i]) ? angles[i] : definition.home[i], joint));
+}
+
 export function switchPreset(state: State, preset: Preset) {
   if (preset === state.preset) return;
   if (state.preset === 'custom') state.custom = { model: state.model, angles: state.angles };
   if (state.preset === 'ur5e') state.ur5e = { angles: state.angles, tool: state.model.tool };
+  if (isVendor(state.preset)) {
+    (state.vendors ??= {})[state.preset] = { angles: state.angles, tool: state.model.tool };
+  }
   if (preset === 'ur5e') {
     restoreUr5e(state, state.ur5e?.angles, state.ur5e?.tool);
+  } else if (isVendor(preset)) {
+    restoreVendor(state, preset, state.vendors?.[preset]?.angles, state.vendors?.[preset]?.tool);
   } else {
     const arm = preset === 'factory' ? defaults() : state.custom ?? defaults();
     state.model = arm.model;
@@ -88,6 +104,7 @@ export function readState(): State {
     const value: State | null = JSON.parse(localStorage.getItem(storageKey) ?? 'null');
     if (!value) return fallback;
     const { model, angles, poses, display, target } = value;
+    if (value.vendors) fallback.vendors = value.vendors;
     const previousElbow = value.preset === 'ur5e' ? angles?.[2] : value.ur5e?.angles?.[2];
     if (value.ur5eRange === 'sw5' || value.ur5eRange === 'polyscope-x') fallback.ur5eRange = value.ur5eRange;
     else if (typeof previousElbow === 'number' && Math.abs(previousElbow) > 160) fallback.ur5eRange = 'polyscope-x';
@@ -95,6 +112,11 @@ export function readState(): State {
       fallback.preset = 'ur5e';
       restoreUr5e(fallback, angles, model?.tool);
       if (value.custom) fallback.custom = customArm(value.custom.model, value.custom.angles);
+    } else if (isVendor(value.preset)) {
+      fallback.preset = value.preset;
+      restoreVendor(fallback, value.preset, angles, model?.tool);
+      if (value.custom) fallback.custom = customArm(value.custom.model, value.custom.angles);
+      if (value.ur5e) fallback.ur5e = value.ur5e;
     } else if (value.preset === 'factory') {
       fallback.preset = 'factory';
       fallback.angles = example.joints.map((joint, i) => clampAngle(

@@ -14,11 +14,13 @@ export interface Joint {
   offset: number;
   fixedRpy?: Triple;
   vector?: Triple;
+  continuous?: boolean;
 }
 export interface Robot {
   joints: Joint[];
   tool: number;
   origin?: Triple;
+  toolRpy?: Triple;
 }
 export interface Pose {
   id: string;
@@ -61,6 +63,10 @@ function transforms(model: Robot, angles: readonly number[], capture: boolean) {
     }
     position.add(displacement.applyQuaternion(orientation));
     if (capture) frames.push({ origin, zero, orientation: orientation.clone(), end: position.clone() });
+  }
+  if (model.toolRpy) {
+    fixed.set(...model.toolRpy, 'ZYX');
+    orientation.multiply(rotation.setFromEuler(fixed));
   }
   position.add(displacement.copy(unit.Z).multiplyScalar(model.tool).applyQuaternion(orientation));
   return { frames, tcp: position, toolOrientation: orientation };

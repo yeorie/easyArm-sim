@@ -90,6 +90,7 @@ export function mobility(model: Robot, solved: Solution, reference: MobilityRefe
 }
 
 export function jointLimitStatus(joint: Joint, angle: number) {
+  if (joint.continuous) return 'free';
   if (joint.min === joint.max) return 'locked';
   const margin = Math.min(angle - joint.min, joint.max - angle);
   if (margin < 1e-5) return 'at';

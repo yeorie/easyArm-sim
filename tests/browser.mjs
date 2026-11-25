@@ -290,7 +290,32 @@ try {
   assert.equal(await legacy.locator('#jog-angle-2').inputValue(), String(initialAngles[2]));
   assert.equal(await legacy.locator('.pose-check').getAttribute('data-level'), 'normal');
   assert.ok(await legacy.locator('body').evaluate(body => body.scrollWidth <= window.innerWidth));
-  console.log('Edge: UR5e 직립 영자세, 정반 차단, 특이점 점멸, 원본 6축 복구, 범위 및 기존 조작 통과');
+  for (const [key, target, count] of [
+    ['fr3', ['306.9', '0.0', '590.3'], 7],
+    ['gen3', ['456.1', '2.0', '434.2'], 7],
+  ]) {
+    await page.locator('#example-tab').click();
+    await page.locator('#load-' + key).click();
+    await page.locator(`.scene[data-appearance="${key}"]`).waitFor();
+    await countJoints(count);
+    assert.deepEqual(await tcp(), target);
+    if (key === 'gen3') assert.equal(await read('#jog-type-2'), '연속 회전');
+    if (process.env.EASYARM_VENDOR_SCREENSHOT) await page.screenshot({ path: key + '-vendor-check.png' });
+    await setField('#jog-angle-0', 25);
+    assert.equal((await allAngles())[0], 25);
+    assert.notDeepEqual(await tcp(), target);
+    await page.locator('#zero').click();
+    await page.waitForFunction(() => document.querySelector('#zero-status').textContent.includes('완료'));
+    assert.deepEqual(await tcp(), target);
+  }
+  await page.reload();
+  await page.locator('.scene[data-appearance="gen3"]').waitFor();
+  await countJoints(7);
+  await page.locator('#example-tab').click();
+  await page.locator('#load-custom').click();
+  await countJoints(4);
+  assert.deepEqual(errors, []);
+  console.log('Edge: UR5e, Franka FR3, Kinova Gen3 메시·조그·기준 자세, 원본 팔 보존과 기존 조작 통과');
 } finally {
   await browser.close();
 }

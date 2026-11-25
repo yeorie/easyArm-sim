@@ -1,11 +1,12 @@
 import './style.css';
 import { axes, clampAngle, interpolate, offsetAxis, poseProblem, radius, sample, solve, zeroBlockedAxes, type Axis } from './kinematics.ts';
 import { createScene, type PointerMode } from './scene.ts';
-import { maxAngle, maxJoints, maxLength, readState, storageKey, switchPreset, type Preset } from './storage.ts';
+import { isVendor, maxAngle, maxJoints, maxLength, readState, storageKey, switchPreset, type Preset } from './storage.ts';
 import { nearestDistance, slicePoints, sliceTolerance, targetPosition } from './workspace.ts';
 import { jointLimitStatus, mobility, mobilityReference, type MobilityReference } from './mobility.ts';
 import { makeUr5e, ur5eUprightAngles, type Ur5eRange } from './ur5e.ts';
 import { pathContact, tableContact } from './ur5e-clearance.ts';
+import { vendorIds, vendorModels } from './vendor-models.ts';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const state = readState();
@@ -212,7 +213,8 @@ function updateStructure(topologyChanged = false) {
   renderPoses();
   workspaceSamples = sample(state.model, 4096, state.preset === 'ur5e' ? solved => !tableContact(solved) : undefined);
   reference = mobilityReference(state.model);
-  scene?.rebuild(state.model, state.preset === 'ur5e');
+  const visual = state.preset === 'ur5e' || isVendor(state.preset) ? state.preset : undefined;
+  scene?.rebuild(state.model, visual);
   scene?.setSamples(workspaceSamples);
   refreshTarget();
   updatePose();
@@ -278,9 +280,12 @@ function renderEditor() {
       <p class="hint">링크 ${joint.length} mm · 측면 ${joint.offset} mm</p>`;
     return;
   }
-  if (state.preset === 'ur5e') {
-    editor.innerHTML = `<div class="editor-heading"><h3>UR5e · J${i + 1} → ${label}</h3></div>
-      <p class="hint">로컬 ${joint.axis} 회전 · ${joint.min}° ~ ${joint.max}°</p>
+  if (state.preset === 'ur5e' || isVendor(state.preset)) {
+    const name = state.preset === 'ur5e' ? 'UR5e' : vendorModels[state.preset].name;
+    const limits = joint.continuous ? '연속 회전 · 조작 입력 ±360°'
+      : `${Number(joint.min.toFixed(2))}° ~ ${Number(joint.max.toFixed(2))}°`;
+    editor.innerHTML = `<div class="editor-heading"><h3>${name} · J${i + 1} → ${label}</h3></div>
+      <p class="hint">로컬 ${joint.axis} 회전 · ${limits}</p>
       <p class="hint">다음 원점 XYZ · ${joint.vector?.map(value => Number(value.toFixed(2))).join(' / ')} mm</p>
       <p class="hint">공식 공칭 치수로 고정된 예제입니다.</p>`;
     return;
@@ -370,8 +375,9 @@ function refreshJogLimits() {
       input.max = String(joint.max);
       input.disabled = joint.min === joint.max;
     }
-    element('jog-min-' + i).textContent = joint.min + '°';
-    element('jog-max-' + i).textContent = joint.max + '°';
+    element('jog-min-' + i).textContent = Number(joint.min.toFixed(2)) + '°';
+    element('jog-max-' + i).textContent = Number(joint.max.toFixed(2)) + '°';
+    element('jog-type-' + i).textContent = joint.continuous ? '연속 회전' : '';
     const axis = element('jog-axis-' + i);
     axis.textContent = joint.axis;
     axis.className = 'jog-axis ' + joint.axis.toLowerCase();
@@ -392,7 +398,7 @@ function renderJog() {
         <span class="input-unit"><input id="jog-angle-${index}" type="number" step="any" aria-label="J${index + 1} 각도" /><span>°</span></span>
       </div>
       <input id="jog-range-${index}" type="range" step="any" aria-label="J${index + 1} 조그" />
-      <div class="jog-limits"><span id="jog-min-${index}"></span><span id="jog-max-${index}"></span></div>`;
+      <div class="jog-limits"><span id="jog-min-${index}"></span><span id="jog-type-${index}"></span><span id="jog-max-${index}"></span></div>`;
     jog.append(row);
     const range = element<HTMLInputElement>('jog-range-' + index);
     const angle = element<HTMLInputElement>('jog-angle-' + index);
@@ -408,7 +414,8 @@ function renderJog() {
         const joint = state.model.joints[index];
         if (!Number.isFinite(input.valueAsNumber) || (input === angle && !angle.validity.valid)) {
           angle.setAttribute('aria-invalid', 'true');
-          angleInputStatus.textContent = `J${index + 1} 허용 범위 ${joint.min}° ~ ${joint.max}°`;
+          const label = joint.continuous ? '화면 입력 범위' : '허용 범위';
+          angleInputStatus.textContent = `J${index + 1} ${label} ${Number(joint.min.toFixed(2))}° ~ ${Number(joint.max.toFixed(2))}°`;
           return;
         }
         angle.removeAttribute('aria-invalid');
@@ -512,19 +519,22 @@ for (const [index, name] of tabs.entries()) {
     element(next + '-tab').focus();
   });
 }
+const availablePresets: Preset[] = ['custom', 'ur5e', 'factory', ...vendorIds];
 function displayPreset() {
-  for (const preset of ['custom', 'ur5e', 'factory'] as const) {
+  for (const preset of availablePresets) {
     element<HTMLButtonElement>('load-' + preset).disabled = state.preset === preset;
   }
   element('structure-title').textContent = state.preset === 'ur5e' ? 'UR5e'
-    : state.preset === 'factory' ? '기본 6축 팔 · 원본' : '팔 모델';
+    : state.preset === 'factory' ? '기본 6축 팔 · 원본'
+    : isVendor(state.preset) ? vendorModels[state.preset].name : '팔 모델';
   element('ur-range-panel').hidden = state.preset !== 'ur5e';
   element('angle-reference').hidden = state.preset !== 'ur5e';
+  zeroButton.textContent = isVendor(state.preset) ? '기준 자세 이동' : '영자세 이동';
   tool.disabled = state.preset === 'factory';
   urRange.value = state.ur5eRange;
   urRangeStatus.textContent = '';
 }
-for (const preset of ['custom', 'ur5e', 'factory'] as Preset[]) {
+for (const preset of availablePresets) {
   element('load-' + preset).addEventListener('click', () => {
     stopMove();
     switchPreset(state, preset);
@@ -650,6 +660,10 @@ function moveToReference(angles: readonly number[], name: string) {
 }
 
 zeroButton.addEventListener('click', () => {
+  if (isVendor(state.preset)) {
+    moveToReference(vendorModels[state.preset].home, '기준 자세');
+    return;
+  }
   if (state.preset === 'ur5e') {
     if (pathContact(state.model, state.angles, ur5eUprightAngles)) {
       stopMove();
